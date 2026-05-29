@@ -1,0 +1,833 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Barchart Top 100 — Daily Movement Dashboard</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<style>
+  :root, [data-theme="dark"] {
+    --bg: #0f1217;
+    --panel: #171b23;
+    --panel-2: #1f2430;
+    --text: #e6e9ef;
+    --muted: #8a93a6;
+    --border: #2a3040;
+    --grid: #242a38;
+    --axis: #394055;
+    --up: #22c55e;
+    --up-bg: rgba(34, 197, 94, 0.12);
+    --down: #ef4444;
+    --down-bg: rgba(239, 68, 68, 0.12);
+    --same: #94a3b8;
+    --same-bg: rgba(148, 163, 184, 0.08);
+    --accent: #3b82f6;
+  }
+  [data-theme="light"] {
+    --bg: #f4f6fa;
+    --panel: #ffffff;
+    --panel-2: #f0f3f8;
+    --text: #1a1f2e;
+    --muted: #64748b;
+    --border: #dce1ea;
+    --grid: #e5e9f0;
+    --axis: #94a3b8;
+    --up: #16a34a;
+    --up-bg: rgba(22, 163, 74, 0.10);
+    --down: #dc2626;
+    --down-bg: rgba(220, 38, 38, 0.10);
+    --same: #64748b;
+    --same-bg: rgba(100, 116, 139, 0.08);
+    --accent: #2563eb;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    padding: 24px;
+  }
+  h1 { margin: 0 0 4px; font-size: 22px; letter-spacing: -0.01em; }
+  h2 { margin: 0 0 12px; font-size: 16px; color: var(--muted); font-weight: 500; }
+  .container { max-width: 1600px; margin: 0 auto; }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px;
+    margin-bottom: 20px;
+  }
+  .summary-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 14px;
+    margin-top: 12px;
+  }
+  .stat {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 16px;
+  }
+  .stat .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; }
+  .stat .value { font-size: 26px; font-weight: 600; margin-top: 4px; }
+  .stat.up .value { color: var(--up); }
+  .stat.down .value { color: var(--down); }
+  .stat.same .value { color: var(--same); }
+  .stat.new .value { color: var(--accent); }
+  .stat.dropped .value { color: var(--muted); }
+  .stat.dropped { border-style: dashed; }
+  .stat[data-tile] {
+    cursor: pointer;
+    user-select: none;
+    transition: border-color 120ms, box-shadow 120ms, transform 120ms;
+  }
+  .stat[data-tile]:hover { border-color: var(--accent); }
+  .stat[data-tile]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .stat[data-tile].active {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px var(--accent) inset;
+  }
+  .notable {
+    margin-top: 14px;
+    color: var(--text);
+    line-height: 1.55;
+    font-size: 14px;
+  }
+  .notable strong { color: var(--accent); }
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-family: "SF Mono", Menlo, monospace;
+    margin: 2px 4px 2px 0;
+  }
+  .chip.up { border-color: var(--up); color: var(--up); }
+  .chip.down { border-color: var(--down); color: var(--down); }
+  .chip.new { border-color: var(--accent); color: var(--accent); }
+  .chip.dropped { border-color: var(--muted); color: var(--muted); }
+  .chip[data-symbol] {
+    cursor: pointer;
+    transition: filter 80ms, transform 80ms, box-shadow 80ms;
+  }
+  .chip[data-symbol]:hover { filter: brightness(1.2); transform: translateY(-1px); }
+  .chip[data-symbol]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .chip[data-symbol].active { box-shadow: 0 0 0 2px currentColor inset; filter: brightness(1.25); }
+
+  svg.chart { width: 100%; height: 1200px; display: block; }
+  svg.chart text { font-family: "SF Mono", Menlo, monospace; }
+  .axis path, .axis line { stroke: var(--axis); }
+  .axis text { fill: var(--muted); font-size: 11px; }
+  .grid line { stroke: var(--grid); stroke-dasharray: 2 3; }
+  .sym-label {
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    paint-order: stroke;
+    stroke: var(--panel);
+    stroke-width: 3px;
+    stroke-linejoin: round;
+  }
+  .sym-line { fill: none; stroke-width: 1.5; opacity: 0.55; }
+  .sym-line.dim { opacity: 0.1; }
+  .sym-label.dim { opacity: 0.15; }
+  .sym-line.hi { opacity: 1; stroke-width: 2.5; }
+  .sym-label.hi { opacity: 1; font-size: 12.5px; }
+  .tooltip {
+    position: fixed;
+    pointer-events: none;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px 10px;
+    font-size: 12px;
+    color: var(--text);
+    box-shadow: 0 8px 24px rgba(0,0,0,.4);
+    opacity: 0;
+    transition: opacity 120ms;
+    z-index: 10;
+    max-width: 260px;
+  }
+
+  table.data-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+  table.data-table th {
+    text-align: left;
+    padding: 10px 12px;
+    color: var(--muted);
+    font-weight: 500;
+    border-bottom: 1px solid var(--border);
+    text-transform: uppercase;
+    font-size: 11px;
+    letter-spacing: 0.04em;
+    position: sticky;
+    top: 0;
+    background: var(--panel);
+    white-space: nowrap;
+  }
+  table.data-table th.num { text-align: right; }
+  table.data-table th.num .sort-indicator { margin-left: 4px; }
+  table.data-table th.sortable { cursor: pointer; user-select: none; }
+  table.data-table th.sortable:hover { color: var(--text); }
+  table.data-table th .sort-indicator { margin-left: 4px; opacity: 0.5; }
+  table.data-table td {
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  table.data-table tr.row-up { background: var(--up-bg); }
+  table.data-table tr.row-down { background: var(--down-bg); }
+  table.data-table tr.row-same { background: transparent; }
+  table.data-table tr:hover { filter: brightness(1.2); }
+
+  .mv {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    min-width: 46px;
+    padding: 3px 8px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 600;
+    font-family: "SF Mono", Menlo, monospace;
+  }
+  .mv.up { background: var(--up-bg); color: var(--up); }
+  .mv.down { background: var(--down-bg); color: var(--down); }
+  .mv.same { background: var(--same-bg); color: var(--same); }
+  .mv.new { background: rgba(59,130,246,0.15); color: var(--accent); }
+  td.num { font-family: "SF Mono", Menlo, monospace; text-align: right; }
+  .sym { font-family: "SF Mono", Menlo, monospace; font-weight: 600; }
+
+  .chart-controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 14px 18px;
+    align-items: center;
+    font-size: 13px;
+    color: var(--muted);
+    margin-bottom: 8px;
+  }
+  .chart-controls label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+  .chart-controls select {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 6px;
+    padding: 4px 8px;
+    font-size: 13px;
+    font-family: inherit;
+    cursor: pointer;
+  }
+  .chart-controls select:hover { border-color: var(--accent); }
+  .chart-controls .divider {
+    width: 1px; height: 18px; background: var(--border);
+  }
+
+  .empty { color: var(--muted); padding: 20px; text-align: center; font-size: 14px; }
+
+  .panel-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 16px;
+  }
+  .theme-toggle {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 999px;
+    padding: 6px 14px;
+    font-size: 13px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    transition: background 120ms, border-color 120ms;
+    font-family: inherit;
+  }
+  .theme-toggle:hover { border-color: var(--accent); }
+  .theme-toggle .icon { font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="panel" id="summary-panel">
+    <div class="panel-head">
+      <div>
+        <h1>Barchart Top 100 — Daily Movement Dashboard</h1>
+        <h2 id="last-updated">Last updated: —</h2>
+      </div>
+      <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Toggle theme">
+        <span class="icon" id="theme-icon">☀︎</span>
+        <span id="theme-label">Light mode</span>
+      </button>
+    </div>
+    <div class="summary-grid" style="margin-top: 16px;">
+      <div class="stat up" data-tile="up" tabindex="0" role="button" title="Click to isolate moved-up stocks on today's column"><div class="label">↑ Moved Up</div><div class="value" id="stat-up">0</div></div>
+      <div class="stat down" data-tile="down" tabindex="0" role="button" title="Click to isolate moved-down stocks on today's column"><div class="label">↓ Moved Down</div><div class="value" id="stat-down">0</div></div>
+      <div class="stat same" data-tile="same" tabindex="0" role="button" title="Click to isolate unchanged stocks on today's column"><div class="label">● No Change</div><div class="value" id="stat-same">0</div></div>
+      <div class="stat new" data-tile="new" tabindex="0" role="button" title="Click to isolate new entries on today's column"><div class="label">★ New Entries</div><div class="value" id="stat-new">0</div></div>
+      <div class="stat dropped" data-tile="dropped" tabindex="0" role="button" title="Click to isolate dropped stocks at their last appearance"><div class="label">✕ Dropped</div><div class="value" id="stat-dropped">0</div></div>
+      <div class="stat"><div class="label">Days Tracked</div><div class="value" id="stat-days">0</div></div>
+    </div>
+    <div class="notable" id="notable-movements">Loading…</div>
+  </div>
+
+  <div class="panel">
+    <h1 style="font-size:18px">10-Day Rank Trajectory</h1>
+    <h2>Rank 1 at the top. Click a symbol, summary tile, or notable-movement chip to isolate. Click again or press Esc to reset.</h2>
+    <div class="chart-controls">
+      <label>Date:
+        <select id="date-filter">
+          <option value="all">All (10 days)</option>
+        </select>
+      </label>
+      <label>Movement:
+        <select id="movement-filter">
+          <option value="all">All</option>
+          <option value="up">Moved up ↑</option>
+          <option value="down">Moved down ↓</option>
+        </select>
+      </label>
+      <span class="divider"></span>
+      <label><input type="checkbox" id="toggle-lines" checked /> show trajectory lines</label>
+      <span id="chart-dates"></span>
+    </div>
+    <svg class="chart" id="chart"></svg>
+  </div>
+
+  <div class="panel">
+    <h1 style="font-size:18px">Today's Top 100 — Daily Detail</h1>
+    <h2>Movement column shows rank change versus previous snapshot. Click any header to sort.</h2>
+    <div>
+      <table class="data-table" id="data-table">
+        <thead>
+          <tr>
+            <th class="sortable" data-sort="symbol">Symbol</th>
+            <th class="sortable" data-sort="name">Name</th>
+            <th class="sortable" data-sort="movement">Movement</th>
+            <th class="sortable num" data-sort="weighted_alpha">Wtd Alpha</th>
+            <th class="sortable num" data-sort="rank">Rank <span class="sort-indicator">▲</span></th>
+            <th class="sortable num" data-sort="previous_rank">Prev Rank</th>
+            <th class="sortable num" data-sort="last_price">Last Price</th>
+            <th class="sortable num" data-sort="percent_change">% Change</th>
+            <th class="sortable num" data-sort="high_52w">52W High</th>
+            <th class="sortable num" data-sort="pct_from_high">% from 52W High</th>
+          </tr>
+        </thead>
+        <tbody id="data-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+<div class="tooltip" id="tooltip"></div>
+
+<script src="data.js"></script>
+<script>
+/* -------------------------------------------------------------------------
+   0. Theme toggle (runs before data load so the UI never flashes)
+   ------------------------------------------------------------------------- */
+(function setupTheme() {
+  const root = document.documentElement;
+  const saved = localStorage.getItem("barchart100-theme");
+  const initial = saved || "dark";
+  applyTheme(initial);
+
+  const btn = document.getElementById("theme-toggle");
+  btn.addEventListener("click", () => {
+    const next = root.getAttribute("data-theme") === "dark" ? "light" : "dark";
+    applyTheme(next);
+    localStorage.setItem("barchart100-theme", next);
+  });
+
+  function applyTheme(mode) {
+    root.setAttribute("data-theme", mode);
+    const icon = document.getElementById("theme-icon");
+    const label = document.getElementById("theme-label");
+    if (mode === "dark") { icon.textContent = "☀︎"; label.textContent = "Light mode"; }
+    else                 { icon.textContent = "☾";  label.textContent = "Dark mode";  }
+  }
+})();
+
+/* -------------------------------------------------------------------------
+   1. Load + group data
+   ------------------------------------------------------------------------- */
+const ALL = window.BARCHART_DATA || [];
+const GENERATED_AT = window.BARCHART_GENERATED_AT || "";
+
+if (!ALL.length) {
+  document.querySelector(".container").innerHTML =
+    '<div class="panel empty">No data yet. Run <code>python3 scraper.py</code> first.</div>';
+  throw new Error("no data");
+}
+
+// Group rows by date → Map<date, Map<symbol, row>>
+const byDate = d3.group(ALL, d => d.snapshot_date);
+const dates = [...byDate.keys()].sort();
+const latestDate = dates[dates.length - 1];
+const latestRows = byDate.get(latestDate);
+const prevDate = dates.length > 1 ? dates[dates.length - 2] : null;
+const prevRows = prevDate ? byDate.get(prevDate) : null;
+
+const latestBySymbol = new Map(latestRows.map(r => [r.symbol, r]));
+const prevBySymbol = prevRows ? new Map(prevRows.map(r => [r.symbol, r])) : new Map();
+
+/* -------------------------------------------------------------------------
+   2. Compute movement per symbol vs prior snapshot
+   ------------------------------------------------------------------------- */
+function classify(row) {
+  // When only one snapshot exists, fall back to Barchart's own previous_rank field
+  // so the very first day isn't all "no change".
+  const prevRank = prevBySymbol.has(row.symbol)
+    ? prevBySymbol.get(row.symbol).rank
+    : row.previous_rank;
+
+  if (prevRank == null) return { dir: "new", delta: null, prevRank: null };
+  const delta = prevRank - row.rank;      // +ve means rank number got smaller → moved up
+  if (delta > 0) return { dir: "up", delta, prevRank };
+  if (delta < 0) return { dir: "down", delta, prevRank };
+  return { dir: "same", delta: 0, prevRank };
+}
+
+const enriched = latestRows.map(r => ({ ...r, ...classify(r) }));
+
+// Symbols present in the previous snapshot but not in today's top 100.
+const droppedRows = prevRows
+  ? prevRows.filter(r => !latestBySymbol.has(r.symbol)).sort((a, b) => a.rank - b.rank)
+  : [];
+
+/* -------------------------------------------------------------------------
+   3. Summary panel
+   ------------------------------------------------------------------------- */
+const counts = { up: 0, down: 0, same: 0, new: 0 };
+enriched.forEach(r => counts[r.dir]++);
+document.getElementById("stat-up").textContent = counts.up;
+document.getElementById("stat-down").textContent = counts.down;
+document.getElementById("stat-same").textContent = counts.same;
+document.getElementById("stat-new").textContent = counts.new;
+document.getElementById("stat-dropped").textContent = droppedRows.length;
+document.getElementById("stat-days").textContent = dates.length;
+
+const snapshotTime = latestRows[0].snapshot_time || "";
+document.getElementById("last-updated").textContent =
+  `Last updated: ${latestDate} ${snapshotTime} • file generated ${GENERATED_AT}`;
+
+// Notable movements
+function renderNotable() {
+  const movers = enriched.filter(r => r.dir === "up" || r.dir === "down");
+  const topUp = movers.filter(r => r.dir === "up").sort((a, b) => b.delta - a.delta).slice(0, 5);
+  const topDown = movers.filter(r => r.dir === "down").sort((a, b) => a.delta - b.delta).slice(0, 5);
+  const newEntries = enriched.filter(r => r.dir === "new").slice(0, 10);
+
+  const chip = (text, cls, sym) =>
+    `<span class="chip ${cls}" data-symbol="${sym}" tabindex="0" role="button">${text}</span>`;
+  const parts = [];
+  if (topUp.length) {
+    parts.push(`<strong>Biggest gainers:</strong> ` +
+      topUp.map(r => chip(`${r.symbol} ↑${r.delta} (#${r.prevRank}→#${r.rank})`, "up", r.symbol)).join(""));
+  }
+  if (topDown.length) {
+    parts.push(`<strong>Biggest decliners:</strong> ` +
+      topDown.map(r => chip(`${r.symbol} ↓${Math.abs(r.delta)} (#${r.prevRank}→#${r.rank})`, "down", r.symbol)).join(""));
+  }
+  if (droppedRows.length) {
+    parts.push(`<strong>Dropped off top 100:</strong> ` +
+      droppedRows.slice(0, 10).map(r => chip(`${r.symbol} (was #${r.rank})`, "dropped", r.symbol)).join("") +
+      (droppedRows.length > 10 ? ` <span style="color:var(--muted)">+${droppedRows.length - 10} more</span>` : ""));
+  }
+  if (newEntries.length) {
+    parts.push(`<strong>New to top 100:</strong> ` +
+      newEntries.map(r => chip(`${r.symbol} #${r.rank}`, "new", r.symbol)).join(""));
+  }
+  if (!parts.length) {
+    parts.push("Single-day snapshot — run the scraper again tomorrow to see movement.");
+  }
+  document.getElementById("notable-movements").innerHTML = parts.join("<br/>");
+}
+renderNotable();
+
+/* -------------------------------------------------------------------------
+   4. 10-day rank trajectory chart
+   ------------------------------------------------------------------------- */
+// Full 10-day window (or fewer, if less history exists). `chartDates`
+// inside renderChart() is derived from this + the date filter.
+const WINDOW_DATES = dates.slice(-10);
+
+// Populate the date-filter dropdown with every available window date,
+// newest first.
+(function populateDateFilter() {
+  const sel = document.getElementById("date-filter");
+  WINDOW_DATES.slice().reverse().forEach(d => {
+    const opt = document.createElement("option");
+    opt.value = d;
+    opt.textContent = d;
+    sel.appendChild(opt);
+  });
+})();
+
+// Colour map is STABLE across filter changes — keyed to the union of symbols
+// that appeared anywhere in the full 10-day window.
+const windowSymbols = new Set();
+WINDOW_DATES.forEach(d => byDate.get(d).forEach(r => windowSymbols.add(r.symbol)));
+const symList = [...windowSymbols].sort();
+const color = d3.scaleOrdinal()
+  .domain(symList)
+  .range(symList.map((_, i) => d3.interpolateSinebow(i / symList.length)));
+
+/** Return the dates currently visible given the date-filter selection. */
+function getVisibleDates() {
+  const v = document.getElementById("date-filter").value;
+  return v === "all" ? WINDOW_DATES : [v];
+}
+
+/** Classify a symbol's net direction across a set of visible dates.
+ *   - Multi-day mode: compare first and last visible rank.
+ *   - Single-day mode: use Barchart's `previous_rank` field from that snapshot.
+ *  Returns "up" | "down" | "same" | "new" | null (not present).        */
+function classifySymbol(sym, visibleDates) {
+  if (visibleDates.length === 1) {
+    const row = byDate.get(visibleDates[0]).find(r => r.symbol === sym);
+    if (!row) return null;
+    if (row.previous_rank == null) return "new";
+    if (row.previous_rank > row.rank) return "up";
+    if (row.previous_rank < row.rank) return "down";
+    return "same";
+  }
+  const pts = visibleDates
+    .map(d => byDate.get(d).find(r => r.symbol === sym))
+    .filter(Boolean);
+  if (pts.length === 0) return null;
+  if (pts.length === 1) return "same"; // only one observation — no trajectory
+  const first = pts[0].rank;
+  const last = pts[pts.length - 1].rank;
+  if (first > last) return "up";
+  if (first < last) return "down";
+  return "same";
+}
+
+function renderChart() {
+  const svg = d3.select("#chart");
+  svg.selectAll("*").remove();
+  const rect = svg.node().getBoundingClientRect();
+  const W = rect.width, H = rect.height;
+  const M = { top: 30, right: 70, bottom: 40, left: 60 };
+  const iw = W - M.left - M.right;
+  const ih = H - M.top - M.bottom;
+
+  const g = svg.append("g").attr("transform", `translate(${M.left},${M.top})`);
+
+  const chartDates = getVisibleDates();
+  const movementFilter = document.getElementById("movement-filter").value;
+
+  // X: categorical across dates. scalePoint collapses to a single centered
+  // position when there's only one date, which is exactly what we want.
+  const x = d3.scalePoint().domain(chartDates).range([0, iw]).padding(0.5);
+  // Y: rank 1..100 with 1 on top → invert
+  const y = d3.scaleLinear().domain([0.5, 100.5]).range([0, ih]);
+
+  // Grid + axes
+  g.append("g").attr("class", "grid")
+    .selectAll("line").data([1, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100])
+    .enter().append("line")
+    .attr("x1", 0).attr("x2", iw)
+    .attr("y1", d => y(d)).attr("y2", d => y(d));
+
+  g.append("g").attr("class", "axis")
+    .attr("transform", `translate(0,${ih})`)
+    .call(d3.axisBottom(x).tickFormat(d => d.slice(5)));
+
+  g.append("g").attr("class", "axis")
+    .call(d3.axisLeft(y).tickValues([1, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100]).tickFormat(d3.format("d")));
+
+  g.append("text")
+    .attr("x", -M.left + 10).attr("y", -10)
+    .attr("fill", "var(--muted)").attr("font-size", 11)
+    .text("Rank (1 = top)");
+
+  // Build per-symbol series: [{date, rank}, ...] — only from days the symbol was present.
+  // Then apply the movement filter.
+  const series = symList.map(sym => {
+    const pts = [];
+    chartDates.forEach(d => {
+      const row = byDate.get(d).find(r => r.symbol === sym);
+      if (row) pts.push({ date: d, rank: row.rank });
+    });
+    return { sym, pts, dir: classifySymbol(sym, chartDates) };
+  })
+    .filter(s => s.pts.length > 0)
+    .filter(s => movementFilter === "all" ? true : s.dir === movementFilter);
+
+  // Update the chart-dates info string to reflect the current filter state.
+  const info = document.getElementById("chart-dates");
+  const range = chartDates.length === 1
+    ? chartDates[0]
+    : `${chartDates[0]} → ${chartDates[chartDates.length - 1]}`;
+  const movementLabel = movementFilter === "up" ? "moved up"
+                      : movementFilter === "down" ? "moved down"
+                      : "symbols";
+  info.textContent = `${chartDates.length} day${chartDates.length === 1 ? "" : "s"}: ${range} • ${series.length} ${movementLabel}`;
+
+  const line = d3.line()
+    .x(d => x(d.date))
+    .y(d => y(d.rank));
+
+  const showLines = document.getElementById("toggle-lines").checked;
+  const linesG = g.append("g").attr("class", "lines");
+  const labelsG = g.append("g").attr("class", "labels");
+
+  series.forEach(s => {
+    if (showLines && s.pts.length > 1) {
+      linesG.append("path")
+        .datum(s.pts)
+        .attr("class", "sym-line")
+        .attr("data-sym", s.sym)
+        .attr("stroke", color(s.sym))
+        .attr("d", line);
+    }
+    s.pts.forEach(p => {
+      labelsG.append("text")
+        .attr("class", "sym-label")
+        .attr("data-sym", s.sym)
+        .attr("x", x(p.date))
+        .attr("y", y(p.rank))
+        .attr("dy", "0.32em")
+        .attr("text-anchor", "middle")
+        .attr("fill", color(s.sym))
+        .text(s.sym)
+        .on("mousemove", (ev) => showTip(ev, s.sym, p))
+        .on("mouseleave", hideTip)
+        .on("click", (ev) => { ev.stopPropagation(); toggleHighlightSymbol(s.sym); });
+    });
+  });
+
+  // Clicking empty chart area clears highlight (and any active tile).
+  svg.on("click", () => clearHighlight());
+
+  // Re-apply highlight state — renderChart wipes the SVG, so previously-set
+  // hi/dim classes are gone and need to be re-asserted on the new elements.
+  applyHighlight();
+}
+
+/* Highlight state — a SET of isolated symbols (empty = no isolation) plus
+ * an optional `activeTile` id ("up" | "down" | "same" | "new" | "dropped")
+ * so re-clicking the same tile clears it. */
+let highlightedSyms = new Set();
+let activeTile = null;
+
+function applyHighlight() {
+  const has = highlightedSyms.size > 0;
+  d3.selectAll(".sym-line").classed("hi", false).classed("dim", false);
+  d3.selectAll(".sym-label").classed("hi", false).classed("dim", false);
+  if (has) {
+    d3.selectAll(".sym-line")
+      .classed("hi", function () { return highlightedSyms.has(this.dataset.sym); })
+      .classed("dim", function () { return !highlightedSyms.has(this.dataset.sym); });
+    d3.selectAll(".sym-label")
+      .classed("hi", function () { return highlightedSyms.has(this.dataset.sym); })
+      .classed("dim", function () { return !highlightedSyms.has(this.dataset.sym); });
+  }
+  // Reflect tile + chip activation in the DOM.
+  document.querySelectorAll(".stat[data-tile]").forEach(el => {
+    el.classList.toggle("active", el.dataset.tile === activeTile);
+  });
+  document.querySelectorAll(".chip[data-symbol]").forEach(el => {
+    el.classList.toggle("active",
+      activeTile === null && highlightedSyms.size === 1 && highlightedSyms.has(el.dataset.symbol));
+  });
+}
+
+function toggleHighlightSymbol(sym) {
+  // Toggle: if currently isolating just this one symbol (and not via a tile),
+  // clear; otherwise replace whatever's active with just this symbol.
+  if (activeTile === null && highlightedSyms.size === 1 && highlightedSyms.has(sym)) {
+    highlightedSyms = new Set();
+  } else {
+    highlightedSyms = new Set([sym]);
+  }
+  activeTile = null;
+  applyHighlight();
+}
+
+function toggleHighlightTile(tileId, syms, dateValue) {
+  // Empty bucket → no-op (don't activate a tile that has nothing to show).
+  if (!syms || syms.length === 0) return;
+  if (activeTile === tileId) {
+    // Re-click on the same tile clears, restoring "all dates".
+    highlightedSyms = new Set();
+    activeTile = null;
+    document.getElementById("date-filter").value = "all";
+  } else {
+    highlightedSyms = new Set(syms);
+    activeTile = tileId;
+    document.getElementById("date-filter").value = dateValue;
+  }
+  renderChart(); // re-render for date-filter change; applyHighlight runs at its tail
+}
+
+function clearHighlight() {
+  if (highlightedSyms.size === 0 && !activeTile) return;
+  const wasTile = activeTile !== null;
+  highlightedSyms = new Set();
+  activeTile = null;
+  if (wasTile) {
+    document.getElementById("date-filter").value = "all";
+    renderChart();
+  } else {
+    applyHighlight();
+  }
+}
+
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") clearHighlight();
+});
+
+/* -------------------------------------------------------------------------
+   5. Wire summary-tile clicks → multi-symbol isolate on a single date.
+   Wire notable-movements chip clicks → single-symbol isolate.
+   ------------------------------------------------------------------------- */
+const TILE_BUCKETS = {
+  up:      { syms: enriched.filter(r => r.dir === "up").map(r => r.symbol),    date: latestDate },
+  down:    { syms: enriched.filter(r => r.dir === "down").map(r => r.symbol),  date: latestDate },
+  same:    { syms: enriched.filter(r => r.dir === "same").map(r => r.symbol),  date: latestDate },
+  new:     { syms: enriched.filter(r => r.dir === "new").map(r => r.symbol),   date: latestDate },
+  // Dropped symbols aren't in today's data — they're in the previous snapshot.
+  dropped: { syms: droppedRows.map(r => r.symbol),                             date: prevDate || latestDate },
+};
+
+document.querySelectorAll(".stat[data-tile]").forEach(el => {
+  const onActivate = (ev) => {
+    ev.stopPropagation();
+    const t = el.dataset.tile;
+    const bucket = TILE_BUCKETS[t];
+    toggleHighlightTile(t, bucket.syms, bucket.date);
+  };
+  el.addEventListener("click", onActivate);
+  el.addEventListener("keydown", (ev) => {
+    if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); onActivate(ev); }
+  });
+});
+
+document.getElementById("notable-movements").addEventListener("click", (ev) => {
+  const el = ev.target.closest("[data-symbol]");
+  if (!el) return;
+  ev.stopPropagation();
+  toggleHighlightSymbol(el.dataset.symbol);
+});
+document.getElementById("notable-movements").addEventListener("keydown", (ev) => {
+  if (ev.key !== "Enter" && ev.key !== " ") return;
+  const el = ev.target.closest("[data-symbol]");
+  if (!el) return;
+  ev.preventDefault();
+  toggleHighlightSymbol(el.dataset.symbol);
+});
+
+document.getElementById("toggle-lines").addEventListener("change", renderChart);
+document.getElementById("date-filter").addEventListener("change", () => {
+  // Manual date change deactivates the tile (which had set the date).
+  if (activeTile) { activeTile = null; highlightedSyms = new Set(); }
+  renderChart();
+});
+document.getElementById("movement-filter").addEventListener("change", renderChart);
+window.addEventListener("resize", () => {
+  clearTimeout(window.__resize);
+  window.__resize = setTimeout(renderChart, 150);
+});
+
+const tip = document.getElementById("tooltip");
+function showTip(ev, sym, pt) {
+  const row = byDate.get(pt.date).find(r => r.symbol === sym);
+  tip.innerHTML =
+    `<div style="font-weight:600;color:${color(sym)}">${sym} — ${row ? row.name : ""}</div>` +
+    `<div>Date: ${pt.date}</div>` +
+    `<div>Rank: #${pt.rank}</div>` +
+    (row && row.last_price ? `<div>Last: $${row.last_price.toFixed(2)}</div>` : "");
+  tip.style.left = (ev.clientX + 14) + "px";
+  tip.style.top = (ev.clientY + 14) + "px";
+  tip.style.opacity = 1;
+}
+function hideTip() { tip.style.opacity = 0; }
+
+renderChart();
+
+/* -------------------------------------------------------------------------
+   5. Data table
+   ------------------------------------------------------------------------- */
+const tbody = document.getElementById("data-tbody");
+let sortKey = "rank";
+let sortAsc = true;
+
+function renderTable() {
+  const rows = [...enriched].sort((a, b) => {
+    let va = a[sortKey], vb = b[sortKey];
+    if (sortKey === "pct_from_high") {
+      va = a.high_52w ? (a.last_price / a.high_52w) : 0;
+      vb = b.high_52w ? (b.last_price / b.high_52w) : 0;
+    } else if (sortKey === "movement") {
+      const order = { up: 0, new: 1, same: 2, down: 3 };
+      va = order[a.dir] + (a.delta != null ? a.delta / 100 : 0);
+      vb = order[b.dir] + (b.delta != null ? b.delta / 100 : 0);
+    }
+    if (va == null) va = sortAsc ? Infinity : -Infinity;
+    if (vb == null) vb = sortAsc ? Infinity : -Infinity;
+    if (typeof va === "string") return sortAsc ? va.localeCompare(vb) : vb.localeCompare(va);
+    return sortAsc ? va - vb : vb - va;
+  });
+
+  const arrow = { up: "▲", down: "▼", same: "●", new: "★" };
+  const label = { up: `+${1}`, down: "", same: "—", new: "NEW" };
+
+  tbody.innerHTML = rows.map(r => {
+    const pct = r.high_52w ? ((r.last_price / r.high_52w) * 100).toFixed(1) + "%" : "—";
+    const mvLabel =
+      r.dir === "up"   ? `▲ +${r.delta}` :
+      r.dir === "down" ? `▼ ${r.delta}`  :
+      r.dir === "new"  ? `★ NEW`         : `— 0`;
+    return `<tr class="row-${r.dir}">
+      <td class="sym" style="color:${color(r.symbol) || 'inherit'}">${r.symbol}</td>
+      <td>${r.name}</td>
+      <td><span class="mv ${r.dir}">${mvLabel}</span></td>
+      <td class="num">${r.weighted_alpha != null ? r.weighted_alpha.toFixed(2) : "—"}</td>
+      <td class="num">${r.rank}</td>
+      <td class="num">${r.prevRank == null ? "—" : r.prevRank}</td>
+      <td class="num">$${r.last_price != null ? r.last_price.toFixed(2) : "—"}</td>
+      <td class="num" style="color:${r.percent_change > 0 ? 'var(--up)' : r.percent_change < 0 ? 'var(--down)' : 'inherit'}">${r.percent_change != null ? (r.percent_change > 0 ? '+' : '') + r.percent_change.toFixed(2) + '%' : '—'}</td>
+      <td class="num">$${r.high_52w != null ? r.high_52w.toFixed(2) : "—"}</td>
+      <td class="num">${pct}</td>
+    </tr>`;
+  }).join("");
+
+  document.querySelectorAll("th.sortable").forEach(th => {
+    const ind = th.querySelector(".sort-indicator");
+    if (!ind) return;
+    ind.textContent = th.dataset.sort === sortKey ? (sortAsc ? "▲" : "▼") : "";
+  });
+}
+
+document.querySelectorAll("th.sortable").forEach(th => {
+  // Ensure every sortable header has a sort indicator span
+  if (!th.querySelector(".sort-indicator")) {
+    const s = document.createElement("span");
+    s.className = "sort-indicator";
+    th.appendChild(s);
+  }
+  th.addEventListener("click", () => {
+    const key = th.dataset.sort;
+    if (sortKey === key) sortAsc = !sortAsc;
+    else { sortKey = key; sortAsc = true; }
+    renderTable();
+  });
+});
+
+renderTable();
+</script>
+</body>
+</html>

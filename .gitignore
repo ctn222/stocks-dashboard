@@ -1,0 +1,35 @@
+# ──────────────────────────────────────────────────────────────────────
+#  WHITELIST .gitignore
+#  Your working folder is ~1.2 GB (etf_yield_calculator, UW Data,
+#  dark-pool-dashboard, PDFs, logs, ...). We do NOT want that on GitHub.
+#
+#  Strategy: ignore EVERYTHING, then re-include only the files that make
+#  up the online dashboard (~8 MB). To publish another project later,
+#  add a matching `!/<folder>/` line below.
+# ──────────────────────────────────────────────────────────────────────
+
+# 1. Ignore everything at the repo root
+/*
+
+# 2. Re-include the deployment machinery
+!/.gitignore
+!/.nojekyll
+!/.github/
+!/index.html
+!/dashboard.html
+!/DEPLOY.md
+
+# 3. Re-include the five dashboards wired into the combined view
+!/52weeknewhigh/
+!/barchart100/
+!/mostactive/
+!/topgainers1m/
+!/topoptions/
+
+# 4. Inside those folders, drop noise we don't want online
+**/.claude/
+**/logs/
+**/__pycache__/
+**/*.pyc
+**/.DS_Store
+**/.ipynb_checkpoints/

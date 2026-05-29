@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  macOS launchd job — runs run_daily.sh every weekday at 4:05 PM local time.
+
+  Install:
+    cp com.topgainers1m.daily.plist ~/Library/LaunchAgents/
+    launchctl load  ~/Library/LaunchAgents/com.topgainers1m.daily.plist
+
+  Uninstall:
+    launchctl unload ~/Library/LaunchAgents/com.topgainers1m.daily.plist
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.topgainers1m.daily</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/cnguyen/Claude/Local Apps/topgainers1m/run_daily.sh</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/cnguyen/Claude/Local Apps/topgainers1m</string>
+
+  <key>StartCalendarInterval</key>
+  <array>
+    <dict><key>Weekday</key><integer>1</integer><key>Hour</key><integer>16</integer><key>Minute</key><integer>5</integer></dict>
+    <dict><key>Weekday</key><integer>2</integer><key>Hour</key><integer>16</integer><key>Minute</key><integer>5</integer></dict>
+    <dict><key>Weekday</key><integer>3</integer><key>Hour</key><integer>16</integer><key>Minute</key><integer>5</integer></dict>
+    <dict><key>Weekday</key><integer>4</integer><key>Hour</key><integer>16</integer><key>Minute</key><integer>5</integer></dict>
+    <dict><key>Weekday</key><integer>5</integer><key>Hour</key><integer>16</integer><key>Minute</key><integer>5</integer></dict>
+  </array>
+
+  <key>StandardOutPath</key>
+  <string>/Users/cnguyen/Claude/Local Apps/topgainers1m/logs/launchd.out.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>/Users/cnguyen/Claude/Local Apps/topgainers1m/logs/launchd.err.log</string>
+
+  <key>RunAtLoad</key>
+  <false/>
+</dict>
+</plist>

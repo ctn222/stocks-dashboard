@@ -1,0 +1,72 @@
+name: Daily scrape
+
+# ─────────────────────────────────────────────────────────────────────
+#  Runs all five scrapers in the cloud on a schedule, then commits the
+#  refreshed data.csv / data.js back to the repo. GitHub Pages serves the
+#  updated dashboard automatically. Runs even when your Mac is off.
+# ─────────────────────────────────────────────────────────────────────
+
+on:
+  schedule:
+    # 21:10 UTC, Mon–Fri = after the 4:00 PM ET market close year-round
+    # (5:10 PM during EDT / summer, 4:10 PM during EST / winter).
+    # GitHub cron is always UTC and does NOT follow daylight saving.
+    # GitHub may also delay scheduled runs by 5–30 min under load.
+    - cron: "10 21 * * 1-5"
+  workflow_dispatch: {}        # adds a manual "Run workflow" button
+
+permissions:
+  contents: write              # lets the job push refreshed data back
+
+concurrency:
+  group: daily-scrape
+  cancel-in-progress: false
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Run all scrapers
+        id: scrape
+        run: |
+          failed=""
+          for proj in 52weeknewhigh barchart100 mostactive topgainers1m topoptions; do
+            echo "::group::$proj"
+            if (cd "$proj" && python3 scraper.py); then
+              echo "OK  $proj"
+            else
+              echo "FAIL $proj"
+              failed="$failed $proj"
+            fi
+            echo "::endgroup::"
+          done
+          echo "failed=$failed" >> "$GITHUB_OUTPUT"
+
+      - name: Commit refreshed data
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add */data.js */data.csv
+          if git diff --cached --quiet; then
+            echo "No data changes to commit."
+          else
+            git commit -m "data: daily refresh $(date -u +%F)"
+            git push
+          fi
+
+      - name: Report scraper failures
+        if: steps.scrape.outputs.failed != ''
+        run: |
+          echo "::error::Some scrapers failed:${{ steps.scrape.outputs.failed }}"
+          echo "Good data from the others was still committed."
+          echo "If a financial site is blocking GitHub's IP, that scraper"
+          echo "may need to stay on the Mac (hybrid mode) — see DEPLOY.md."
+          exit 1

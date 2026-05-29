@@ -1,0 +1,1304 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Daily Stocks Data</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<style>
+  :root, [data-theme="dark"] {
+    --bg: #0f1217;
+    --panel: #171b23;
+    --panel-2: #1f2430;
+    --text: #e6e9ef;
+    --muted: #8a93a6;
+    --border: #2a3040;
+    --grid: #242a38;
+    --axis: #394055;
+    --up: #22c55e;
+    --up-bg: rgba(34, 197, 94, 0.12);
+    --down: #ef4444;
+    --down-bg: rgba(239, 68, 68, 0.12);
+    --same: #94a3b8;
+    --same-bg: rgba(148, 163, 184, 0.08);
+    --accent: #3b82f6;
+  }
+  [data-theme="light"] {
+    --bg: #f4f6fa;
+    --panel: #ffffff;
+    --panel-2: #f0f3f8;
+    --text: #1a1f2e;
+    --muted: #64748b;
+    --border: #dce1ea;
+    --grid: #e5e9f0;
+    --axis: #94a3b8;
+    --up: #16a34a;
+    --up-bg: rgba(22, 163, 74, 0.10);
+    --down: #dc2626;
+    --down-bg: rgba(220, 38, 38, 0.10);
+    --same: #64748b;
+    --same-bg: rgba(100, 116, 139, 0.08);
+    --accent: #2563eb;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    padding: 24px;
+  }
+  h1 { margin: 0 0 4px; font-size: 22px; letter-spacing: -0.01em; }
+  h2 { margin: 0 0 12px; font-size: 16px; color: var(--muted); font-weight: 500; }
+  .container { max-width: 1600px; margin: 0 auto; }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px;
+    margin-bottom: 20px;
+  }
+  .page-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 16px;
+    margin-bottom: 20px;
+  }
+  .page-header h1 { font-size: 26px; }
+  .page-header h2 { font-size: 14px; }
+
+  /* Top 4 mini-summary panels */
+  .top-panels {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-bottom: 20px;
+  }
+  @media (max-width: 1100px) {
+    .top-panels { grid-template-columns: 1fr; }
+  }
+  .mini-summary {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px 18px;
+    cursor: pointer;
+    transition: border-color 120ms, box-shadow 120ms;
+  }
+  .mini-summary:hover { border-color: var(--accent); }
+  .mini-summary.active-project {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px var(--accent) inset;
+  }
+  .mini-summary .panel-title {
+    margin: 0 0 4px;
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text);
+    letter-spacing: -0.01em;
+  }
+  .mini-summary .last-updated {
+    margin: 0 0 12px;
+    font-size: 11px;
+    color: var(--muted);
+  }
+  .mini-summary .active-tag {
+    display: inline-block;
+    margin-left: 8px;
+    padding: 1px 8px;
+    border-radius: 999px;
+    background: var(--accent);
+    color: #fff;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    vertical-align: middle;
+  }
+  .mini-summary .summary-grid {
+    grid-template-columns: repeat(auto-fit, minmax(105px, 1fr));
+    gap: 8px;
+    margin: 0 0 12px;
+  }
+  .mini-summary .stat { padding: 8px 10px; }
+  .mini-summary .stat .label { font-size: 10px; }
+  .mini-summary .stat .value { font-size: 20px; }
+  .mini-summary .notable { margin-top: 0; font-size: 12px; line-height: 1.5; }
+
+  .summary-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 14px;
+    margin-top: 12px;
+  }
+  .stat {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 16px;
+  }
+  .stat .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; }
+  .stat .value { font-size: 26px; font-weight: 600; margin-top: 4px; }
+  .stat.up .value { color: var(--up); }
+  .stat.down .value { color: var(--down); }
+  .stat.same .value { color: var(--same); }
+  .stat.new .value { color: var(--accent); }
+  .stat.dropped .value { color: var(--muted); }
+  .stat.dropped { border-style: dashed; }
+  .stat[data-tile] {
+    cursor: pointer;
+    user-select: none;
+    transition: border-color 120ms, box-shadow 120ms, transform 120ms;
+  }
+  .stat[data-tile]:hover { border-color: var(--accent); }
+  .stat[data-tile]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .stat[data-tile].active {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px var(--accent) inset;
+  }
+  .notable {
+    margin-top: 14px;
+    color: var(--text);
+    line-height: 1.55;
+    font-size: 14px;
+  }
+  .notable strong { color: var(--accent); }
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-family: "SF Mono", Menlo, monospace;
+    margin: 2px 4px 2px 0;
+  }
+  .chip.up { border-color: var(--up); color: var(--up); }
+  .chip.down { border-color: var(--down); color: var(--down); }
+  .chip.new { border-color: var(--accent); color: var(--accent); }
+  .chip.dropped { border-color: var(--muted); color: var(--muted); }
+  .chip[data-symbol] {
+    cursor: pointer;
+    transition: filter 80ms, transform 80ms, box-shadow 80ms;
+  }
+  .chip[data-symbol]:hover { filter: brightness(1.2); transform: translateY(-1px); }
+  .chip[data-symbol]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .chip[data-symbol].active { box-shadow: 0 0 0 2px currentColor inset; filter: brightness(1.25); }
+  .mini-summary .chip { font-size: 11px; padding: 1px 7px; }
+
+  svg.chart { width: 100%; height: 1200px; display: block; }
+  svg.chart text { font-family: "SF Mono", Menlo, monospace; }
+  .axis path, .axis line { stroke: var(--axis); }
+  .axis text { fill: var(--muted); font-size: 11px; }
+  .grid line { stroke: var(--grid); stroke-dasharray: 2 3; }
+  .sym-label {
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    paint-order: stroke;
+    stroke: var(--panel);
+    stroke-width: 3px;
+    stroke-linejoin: round;
+  }
+  .sym-line { fill: none; stroke-width: 1.5; opacity: 0.55; }
+  .sym-line.dim { opacity: 0.1; }
+  .sym-label.dim { opacity: 0.15; }
+  .sym-line.hi { opacity: 1; stroke-width: 2.5; }
+  .sym-label.hi { opacity: 1; font-size: 12.5px; }
+  .tooltip {
+    position: fixed;
+    pointer-events: none;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px 10px;
+    font-size: 12px;
+    color: var(--text);
+    box-shadow: 0 8px 24px rgba(0,0,0,.4);
+    opacity: 0;
+    transition: opacity 120ms;
+    z-index: 10;
+    max-width: 260px;
+  }
+
+  table.data-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+  table.data-table th {
+    text-align: left;
+    padding: 10px 12px;
+    color: var(--muted);
+    font-weight: 500;
+    border-bottom: 1px solid var(--border);
+    text-transform: uppercase;
+    font-size: 11px;
+    letter-spacing: 0.04em;
+    position: sticky;
+    top: 0;
+    background: var(--panel);
+    white-space: nowrap;
+  }
+  table.data-table th.num { text-align: right; }
+  table.data-table th.sortable { cursor: pointer; user-select: none; }
+  table.data-table th.sortable:hover { color: var(--text); }
+  table.data-table th .sort-indicator { margin-left: 4px; opacity: 0.5; }
+  table.data-table td {
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  table.data-table tr.row-up { background: var(--up-bg); }
+  table.data-table tr.row-down { background: var(--down-bg); }
+  table.data-table tr.row-same { background: transparent; }
+  table.data-table tr.row-new { background: rgba(59,130,246,0.10); }
+  table.data-table tr:hover { filter: brightness(1.2); }
+
+  .mv {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    min-width: 60px;
+    padding: 3px 10px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 600;
+    font-family: "SF Mono", Menlo, monospace;
+  }
+  .mv.up { background: var(--up-bg); color: var(--up); }
+  .mv.down { background: var(--down-bg); color: var(--down); }
+  .mv.same { background: var(--same-bg); color: var(--same); }
+  .mv.new { background: rgba(59,130,246,0.15); color: var(--accent); }
+  td.num { font-family: "SF Mono", Menlo, monospace; text-align: right; }
+  .sym { font-family: "SF Mono", Menlo, monospace; font-weight: 600; }
+
+  .pc {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-family: "SF Mono", Menlo, monospace;
+    font-size: 11px;
+    font-weight: 600;
+  }
+  .pc.calls { background: var(--up-bg); color: var(--up); }
+  .pc.puts { background: var(--down-bg); color: var(--down); }
+  .pc.neutral { background: var(--same-bg); color: var(--same); }
+
+  .chart-controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 14px 18px;
+    align-items: center;
+    font-size: 13px;
+    color: var(--muted);
+    margin-bottom: 8px;
+  }
+  .chart-controls label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+  .chart-controls select {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 6px;
+    padding: 4px 8px;
+    font-size: 13px;
+    font-family: inherit;
+    cursor: pointer;
+  }
+  .chart-controls select:hover { border-color: var(--accent); }
+  .chart-controls .divider {
+    width: 1px; height: 18px; background: var(--border);
+  }
+
+  .empty { color: var(--muted); padding: 20px; text-align: center; font-size: 14px; }
+
+  .theme-toggle {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 999px;
+    padding: 6px 14px;
+    font-size: 13px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    transition: background 120ms, border-color 120ms;
+    font-family: inherit;
+  }
+  .theme-toggle:hover { border-color: var(--accent); }
+  .theme-toggle .icon { font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="page-header">
+    <div>
+      <h1>Daily Stocks Data</h1>
+      <h2 id="page-subtitle">Click any panel below to load its 10-day trajectory and daily detail.</h2>
+    </div>
+    <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Toggle theme">
+      <span class="icon" id="theme-icon">☀︎</span>
+      <span id="theme-label">Light mode</span>
+    </button>
+  </div>
+
+  <div class="top-panels" id="top-panels">
+    <!-- SCAFFOLD: PANELS START -->
+    <div class="mini-summary" data-project="barchart100" id="panel-barchart100" tabindex="0"></div>
+    <div class="mini-summary" data-project="topoptions" id="panel-topoptions" tabindex="0"></div>
+    <div class="mini-summary" data-project="mostactive" id="panel-mostactive" tabindex="0"></div>
+    <div class="mini-summary" data-project="topgainers1m" id="panel-topgainers1m" tabindex="0"></div>
+    <div class="mini-summary" data-project="52weeknewhigh" id="panel-52weeknewhigh" tabindex="0"></div>
+    <!-- SCAFFOLD: PANELS END -->
+  </div>
+
+  <div class="panel">
+    <h1 style="font-size:18px">10-Day Rank Trajectory — <span id="active-traj-title">—</span></h1>
+    <h2 id="active-traj-subtitle">Click a symbol, summary tile, or notable-movement chip to isolate. Click again or press Esc to reset.</h2>
+    <div class="chart-controls">
+      <label>Date:
+        <select id="date-filter">
+          <option value="all">All (10 days)</option>
+        </select>
+      </label>
+      <label>Movement:
+        <select id="movement-filter">
+          <option value="all">All</option>
+          <option value="up">Moved up ↑</option>
+          <option value="down">Moved down ↓</option>
+        </select>
+      </label>
+      <span class="divider"></span>
+      <label><input type="checkbox" id="toggle-lines" checked /> show trajectory lines</label>
+      <span id="chart-dates"></span>
+    </div>
+    <svg class="chart" id="chart"></svg>
+  </div>
+
+  <div class="panel">
+    <h1 style="font-size:18px">Today's <span id="active-detail-title">—</span> — Daily Detail</h1>
+    <h2 id="active-detail-subtitle">Movement column shows rank change versus previous snapshot. Click any header to sort.</h2>
+    <div>
+      <table class="data-table" id="data-table">
+        <thead id="data-thead"></thead>
+        <tbody id="data-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+<div class="tooltip" id="tooltip"></div>
+
+<!-- SCAFFOLD: DATA SCRIPTS START -->
+<script src="barchart100/data.js"></script>
+<script>
+  window.DATA_BARCHART = window.BARCHART_DATA || [];
+  window.GEN_BARCHART = window.BARCHART_GENERATED_AT || "";
+</script>
+<script src="topoptions/data.js"></script>
+<script>
+  window.DATA_TOPOPTIONS = window.WEBULL_DATA || [];
+  window.GEN_TOPOPTIONS = window.WEBULL_GENERATED_AT || "";
+</script>
+<script src="mostactive/data.js"></script>
+<script>
+  window.DATA_MOSTACTIVE = window.WEBULL_DATA || [];
+  window.GEN_MOSTACTIVE = window.WEBULL_GENERATED_AT || "";
+</script>
+<script src="topgainers1m/data.js"></script>
+<script>
+  window.DATA_TOPGAINERS1M = window.WEBULL_DATA || [];
+  window.GEN_TOPGAINERS1M = window.WEBULL_GENERATED_AT || "";
+</script>
+<script src="52weeknewhigh/data.js"></script>
+<script>
+  window.DATA_52WEEKNEWHIGH = window.WEBULL_DATA || [];
+  window.GEN_52WEEKNEWHIGH = window.WEBULL_GENERATED_AT || "";
+</script>
+<!-- SCAFFOLD: DATA SCRIPTS END -->
+<script>
+/* -------------------------------------------------------------------------
+   Theme toggle
+   ------------------------------------------------------------------------- */
+(function setupTheme() {
+  const root = document.documentElement;
+  const saved = localStorage.getItem("dailystocks-theme");
+  const initial = saved || "dark";
+  applyTheme(initial);
+  const btn = document.getElementById("theme-toggle");
+  btn.addEventListener("click", () => {
+    const next = root.getAttribute("data-theme") === "dark" ? "light" : "dark";
+    applyTheme(next);
+    localStorage.setItem("dailystocks-theme", next);
+  });
+  function applyTheme(mode) {
+    root.setAttribute("data-theme", mode);
+    const icon = document.getElementById("theme-icon");
+    const label = document.getElementById("theme-label");
+    if (mode === "dark") { icon.textContent = "☀︎"; label.textContent = "Light mode"; }
+    else                 { icon.textContent = "☾";  label.textContent = "Dark mode";  }
+  }
+})();
+
+/* -------------------------------------------------------------------------
+   Format helpers
+   ------------------------------------------------------------------------- */
+function fmtCompact(n) {
+  if (n == null) return "—";
+  const abs = Math.abs(n);
+  if (abs >= 1e12) return (n / 1e12).toFixed(2) + "T";
+  if (abs >= 1e9)  return (n / 1e9).toFixed(2) + "B";
+  if (abs >= 1e6)  return (n / 1e6).toFixed(2) + "M";
+  if (abs >= 1e3)  return (n / 1e3).toFixed(2) + "K";
+  return String(n);
+}
+function fmtPrice(p) {
+  if (p == null) return "—";
+  if (Math.abs(p) < 1) return p.toFixed(4);
+  return p.toFixed(2);
+}
+function fmtPct(p, signed = false) {
+  if (p == null) return "—";
+  return (signed && p > 0 ? "+" : "") + p.toFixed(2) + "%";
+}
+function fmtPctVar(p, signed = false) {
+  if (p == null) return "—";
+  const abs = Math.abs(p);
+  const decimals = abs >= 1000 ? 0 : abs >= 100 ? 1 : 2;
+  return (signed && p > 0 ? "+" : "") + p.toFixed(decimals) + "%";
+}
+function fmtRatio(r) {
+  if (r == null) return "—";
+  return r.toFixed(2);
+}
+function fmtPE(p) {
+  if (p == null) return "—";
+  if (p < 0) return "—";
+  if (p > 9999) return "9999+";
+  return p.toFixed(2);
+}
+function pcClass(r) {
+  if (r == null) return "neutral";
+  if (r >= 1.2) return "puts";
+  if (r <= 0.83) return "calls";
+  return "neutral";
+}
+function mvLabel(r) {
+  return r.dir === "up"   ? `▲ +${r.delta}` :
+         r.dir === "down" ? `▼ ${r.delta}`  :
+         r.dir === "new"  ? `★ NEW`         : `— 0`;
+}
+
+/* -------------------------------------------------------------------------
+   Project configurations
+   ------------------------------------------------------------------------- */
+const PROJECT_ORDER = [/* SCAFFOLD: ORDER START */"barchart100", "topoptions", "mostactive", "topgainers1m", "52weeknewhigh"/* SCAFFOLD: ORDER END */];
+
+const PROJECT_CONFIGS = {
+  /* SCAFFOLD: CONFIGS START */
+  barchart100: {
+    title: "Barchart Top 100",
+    detailTitle: "Top 100",
+    rankAxisLabel: "Rank (1 = top)",
+    trajectorySubtitle: "Rank 1 at the top. Click a symbol, summary tile, or notable-movement chip to isolate. Click again or press Esc to reset.",
+    detailSubtitle: "Movement column shows rank change versus previous snapshot. Click any header to sort.",
+    data: window.DATA_BARCHART,
+    generatedAt: window.GEN_BARCHART,
+    isBarchart: true,
+    notableLabels: { gainers: "Biggest gainers:", decliners: "Biggest decliners:" },
+    detailColumns: [
+      { key: "symbol", label: "Symbol" },
+      { key: "name", label: "Name" },
+      { key: "movement", label: "Movement" },
+      { key: "weighted_alpha", label: "Wtd Alpha", num: true },
+      { key: "rank", label: "Rank", num: true },
+      { key: "previous_rank", label: "Prev Rank", num: true },
+      { key: "last_price", label: "Last Price", num: true },
+      { key: "percent_change", label: "% Change", num: true },
+      { key: "high_52w", label: "52W High", num: true },
+      { key: "pct_from_high", label: "% from 52W High", num: true },
+    ],
+    sortKey: "rank",
+    sortAsc: true,
+    customSortValue: (key, r) => {
+      if (key === "pct_from_high") return r.high_52w ? (r.last_price / r.high_52w) : 0;
+      return undefined;
+    },
+    renderDetailRow: (r, color) => {
+      const pct = r.high_52w ? ((r.last_price / r.high_52w) * 100).toFixed(1) + "%" : "—";
+      const pctChgColor = r.percent_change > 0 ? 'var(--up)' : r.percent_change < 0 ? 'var(--down)' : 'inherit';
+      return `<tr class="row-${r.dir}">
+        <td class="sym" style="color:${color(r.symbol) || 'inherit'}">${r.symbol}</td>
+        <td>${r.name}</td>
+        <td><span class="mv ${r.dir}">${mvLabel(r)}</span></td>
+        <td class="num">${r.weighted_alpha != null ? r.weighted_alpha.toFixed(2) : "—"}</td>
+        <td class="num">${r.rank}</td>
+        <td class="num">${r.prevRank == null ? "—" : r.prevRank}</td>
+        <td class="num">$${r.last_price != null ? r.last_price.toFixed(2) : "—"}</td>
+        <td class="num" style="color:${pctChgColor}">${r.percent_change != null ? (r.percent_change > 0 ? '+' : '') + r.percent_change.toFixed(2) + '%' : '—'}</td>
+        <td class="num">$${r.high_52w != null ? r.high_52w.toFixed(2) : "—"}</td>
+        <td class="num">${pct}</td>
+      </tr>`;
+    },
+    tooltipExtras: (row) =>
+      row && row.last_price != null ? `<div>Last: $${row.last_price.toFixed(2)}</div>` : "",
+  },
+
+  topoptions: {
+    title: "Webull Options Total Volume 100",
+    detailTitle: "Options Total Volume 100",
+    rankAxisLabel: "Rank (1 = top, by options total volume)",
+    trajectorySubtitle: "Rank 1 (highest options total volume) at the top. Click a symbol, summary tile, or notable-movement chip to isolate. Click again or press Esc to reset.",
+    detailSubtitle: "Sorted by options total volume rank (1 = highest). Movement column shows rank change versus previous snapshot. Click any header to sort.",
+    data: window.DATA_TOPOPTIONS,
+    generatedAt: window.GEN_TOPOPTIONS,
+    notableLabels: { gainers: "Biggest gainers in rank:", decliners: "Biggest decliners in rank:" },
+    detailColumns: [
+      { key: "rank", label: "No.", num: true },
+      { key: "symbol", label: "Symbol" },
+      { key: "name", label: "Name" },
+      { key: "movement", label: "Movement" },
+      { key: "option_volume", label: "Options Vol", num: true },
+      { key: "open_interest", label: "Open Interest", num: true },
+      { key: "vol_pc_ratio", label: "P/C Vol", num: true },
+      { key: "oi_pc_ratio", label: "P/C OI", num: true },
+      { key: "last_price", label: "Last Price", num: true },
+      { key: "percent_change", label: "% Change", num: true },
+      { key: "stock_volume", label: "Stock Vol", num: true },
+      { key: "high", label: "High", num: true },
+      { key: "low", label: "Low", num: true },
+      { key: "percent_range", label: "% Range", num: true },
+      { key: "market_cap", label: "Market Cap", num: true },
+    ],
+    sortKey: "rank",
+    sortAsc: true,
+    renderDetailRow: (r, color) => {
+      const pctChgColor = r.percent_change > 0 ? "var(--up)" : r.percent_change < 0 ? "var(--down)" : "inherit";
+      return `<tr class="row-${r.dir}">
+        <td class="num">${r.rank}</td>
+        <td class="sym" style="color:${color(r.symbol) || 'inherit'}">${r.symbol}</td>
+        <td>${r.name}</td>
+        <td><span class="mv ${r.dir}">${mvLabel(r)}</span></td>
+        <td class="num">${fmtCompact(r.option_volume)}</td>
+        <td class="num">${fmtCompact(r.open_interest)}</td>
+        <td class="num"><span class="pc ${pcClass(r.vol_pc_ratio)}">${fmtRatio(r.vol_pc_ratio)}</span></td>
+        <td class="num"><span class="pc ${pcClass(r.oi_pc_ratio)}">${fmtRatio(r.oi_pc_ratio)}</span></td>
+        <td class="num">$${fmtPrice(r.last_price)}</td>
+        <td class="num" style="color:${pctChgColor}">${fmtPct(r.percent_change, true)}</td>
+        <td class="num">${fmtCompact(r.stock_volume)}</td>
+        <td class="num">$${fmtPrice(r.high)}</td>
+        <td class="num">$${fmtPrice(r.low)}</td>
+        <td class="num">${fmtPct(r.percent_range)}</td>
+        <td class="num">${fmtCompact(r.market_cap)}</td>
+      </tr>`;
+    },
+    tooltipExtras: (row) => {
+      let h = "";
+      if (row && row.option_volume != null) h += `<div>Options vol: ${fmtCompact(row.option_volume)}</div>`;
+      if (row && row.open_interest != null) h += `<div>Open int: ${fmtCompact(row.open_interest)}</div>`;
+      if (row && row.vol_pc_ratio != null)  h += `<div>P/C Vol: ${row.vol_pc_ratio.toFixed(2)}</div>`;
+      if (row && row.last_price != null)    h += `<div>Last: $${fmtPrice(row.last_price)}</div>`;
+      return h;
+    },
+  },
+
+  mostactive: {
+    title: "Webull Most Active 100",
+    detailTitle: "Most Active 100",
+    rankAxisLabel: "Rank (1 = top, by volume)",
+    trajectorySubtitle: "Rank 1 (highest volume) at the top. Click a symbol, summary tile, or notable-movement chip to isolate. Click again or press Esc to reset.",
+    detailSubtitle: "Sorted by volume rank (1 = highest). Movement column shows rank change versus previous snapshot. Click any header to sort.",
+    data: window.DATA_MOSTACTIVE,
+    generatedAt: window.GEN_MOSTACTIVE,
+    notableLabels: { gainers: "Biggest gainers in rank:", decliners: "Biggest decliners in rank:" },
+    detailColumns: [
+      { key: "rank", label: "No.", num: true },
+      { key: "symbol", label: "Symbol" },
+      { key: "name", label: "Name" },
+      { key: "movement", label: "Movement" },
+      { key: "volume", label: "Volume", num: true },
+      { key: "percent_change", label: "% Change", num: true },
+      { key: "last_price", label: "Last Price", num: true },
+      { key: "high", label: "High", num: true },
+      { key: "low", label: "Low", num: true },
+      { key: "percent_range", label: "% Range", num: true },
+      { key: "percent_turnover", label: "% Turnover", num: true },
+      { key: "market_cap", label: "Market Cap", num: true },
+    ],
+    sortKey: "rank",
+    sortAsc: true,
+    renderDetailRow: (r, color) => {
+      const pctChgColor = r.percent_change > 0 ? "var(--up)" : r.percent_change < 0 ? "var(--down)" : "inherit";
+      return `<tr class="row-${r.dir}">
+        <td class="num">${r.rank}</td>
+        <td class="sym" style="color:${color(r.symbol) || 'inherit'}">${r.symbol}</td>
+        <td>${r.name}</td>
+        <td><span class="mv ${r.dir}">${mvLabel(r)}</span></td>
+        <td class="num">${fmtCompact(r.volume)}</td>
+        <td class="num" style="color:${pctChgColor}">${fmtPct(r.percent_change, true)}</td>
+        <td class="num">$${fmtPrice(r.last_price)}</td>
+        <td class="num">$${fmtPrice(r.high)}</td>
+        <td class="num">$${fmtPrice(r.low)}</td>
+        <td class="num">${fmtPct(r.percent_range)}</td>
+        <td class="num">${fmtPct(r.percent_turnover)}</td>
+        <td class="num">${fmtCompact(r.market_cap)}</td>
+      </tr>`;
+    },
+    tooltipExtras: (row) => {
+      let h = "";
+      if (row && row.last_price) h += `<div>Last: $${fmtPrice(row.last_price)}</div>`;
+      if (row && row.volume)     h += `<div>Vol: ${fmtCompact(row.volume)}</div>`;
+      return h;
+    },
+  },
+
+  topgainers1m: {
+    title: "Webull Top Gainers (1M)",
+    detailTitle: "Top Gainers (1M)",
+    rankAxisLabel: "Rank (1 = top, by 1-month gain)",
+    trajectorySubtitle: "Rank 1 (highest 1-month gain) at the top. Click a symbol, summary tile, or notable-movement chip to isolate. Click again or press Esc to reset.",
+    detailSubtitle: "Sorted by 1-month gain rank (1 = biggest gainer). Movement column shows rank change versus previous snapshot. Click any header to sort.",
+    data: window.DATA_TOPGAINERS1M,
+    generatedAt: window.GEN_TOPGAINERS1M,
+    notableLabels: { gainers: "Biggest gainers in rank:", decliners: "Biggest decliners in rank:" },
+    detailColumns: [
+      { key: "rank", label: "No.", num: true },
+      { key: "symbol", label: "Symbol" },
+      { key: "name", label: "Name" },
+      { key: "movement", label: "Movement" },
+      { key: "pct_change_1m", label: "% Δ 1M", num: true },
+      { key: "last_price", label: "Last Price", num: true },
+      { key: "high", label: "High", num: true },
+      { key: "low", label: "Low", num: true },
+      { key: "volume", label: "Volume", num: true },
+      { key: "pct_range", label: "% Range", num: true },
+      { key: "pe_ratio", label: "P/E", num: true },
+      { key: "market_cap", label: "Market Cap", num: true },
+    ],
+    sortKey: "rank",
+    sortAsc: true,
+    renderDetailRow: (r, color) => {
+      const pctChgColor = r.pct_change_1m > 0 ? "var(--up)" : r.pct_change_1m < 0 ? "var(--down)" : "inherit";
+      return `<tr class="row-${r.dir}">
+        <td class="num">${r.rank}</td>
+        <td class="sym" style="color:${color(r.symbol) || 'inherit'}">${r.symbol}</td>
+        <td>${r.name}</td>
+        <td><span class="mv ${r.dir}">${mvLabel(r)}</span></td>
+        <td class="num" style="color:${pctChgColor}">${fmtPctVar(r.pct_change_1m, true)}</td>
+        <td class="num">$${fmtPrice(r.last_price)}</td>
+        <td class="num">$${fmtPrice(r.high)}</td>
+        <td class="num">$${fmtPrice(r.low)}</td>
+        <td class="num">${fmtCompact(r.volume)}</td>
+        <td class="num">${fmtPctVar(r.pct_range)}</td>
+        <td class="num">${fmtPE(r.pe_ratio)}</td>
+        <td class="num">${fmtCompact(r.market_cap)}</td>
+      </tr>`;
+    },
+    tooltipExtras: (row) => {
+      let h = "";
+      if (row && row.pct_change_1m != null) h += `<div>1M: ${fmtPctVar(row.pct_change_1m, true)}</div>`;
+      if (row && row.last_price != null)    h += `<div>Last: $${fmtPrice(row.last_price)}</div>`;
+      return h;
+    },
+  },
+  "52weeknewhigh": {
+    title: "Webull 52 Week New High",
+    detailTitle: "52 Week New High",
+    rankAxisLabel: "Rank (1 = top, by intraday % change among new-high stocks)",
+    trajectorySubtitle: "Rank 1 at the top among stocks hitting a new 52-week high (top 200). Click a symbol, summary tile, or notable-movement chip to isolate. Click again or press Esc to reset.",
+    detailSubtitle: "Top 200 stocks that printed a new 52-week high today, ordered by Webull's rank. Movement column shows rank change versus previous snapshot. Click any header to sort.",
+    maxRank: 200,
+    data: window.DATA_52WEEKNEWHIGH,
+    generatedAt: window.GEN_52WEEKNEWHIGH,
+    notableLabels: { gainers: "Biggest gainers in rank:", decliners: "Biggest decliners in rank:" },
+    detailColumns: [
+      { key: "rank", label: "No.", num: true },
+      { key: "symbol", label: "Symbol" },
+      { key: "name", label: "Name" },
+      { key: "movement", label: "Movement" },
+      { key: "last_price", label: "Last Price", num: true },
+      { key: "percent_change", label: "% Change", num: true },
+      { key: "high_52w", label: "52W High", num: true },
+      { key: "history_price", label: "Prior High", num: true },
+      { key: "last_change_ratio", label: "Δ vs Prior High", num: true },
+      { key: "high", label: "Day High", num: true },
+      { key: "low", label: "Day Low", num: true },
+      { key: "percent_range", label: "% Range", num: true },
+      { key: "volume", label: "Volume", num: true },
+      { key: "market_cap", label: "Market Cap", num: true },
+    ],
+    sortKey: "rank",
+    sortAsc: true,
+    renderDetailRow: (r, color) => {
+      const pctChgColor = r.percent_change > 0 ? "var(--up)" : r.percent_change < 0 ? "var(--down)" : "inherit";
+      const lcrColor = r.last_change_ratio > 0 ? "var(--up)" : r.last_change_ratio < 0 ? "var(--down)" : "inherit";
+      return `<tr class="row-${r.dir}">
+        <td class="num">${r.rank}</td>
+        <td class="sym" style="color:${color(r.symbol) || 'inherit'}">${r.symbol}</td>
+        <td>${r.name}</td>
+        <td><span class="mv ${r.dir}">${mvLabel(r)}</span></td>
+        <td class="num">$${fmtPrice(r.last_price)}</td>
+        <td class="num" style="color:${pctChgColor}">${fmtPct(r.percent_change, true)}</td>
+        <td class="num">$${fmtPrice(r.high_52w)}</td>
+        <td class="num">$${fmtPrice(r.history_price)}</td>
+        <td class="num" style="color:${lcrColor}">${fmtPct(r.last_change_ratio, true)}</td>
+        <td class="num">$${fmtPrice(r.high)}</td>
+        <td class="num">$${fmtPrice(r.low)}</td>
+        <td class="num">${fmtPct(r.percent_range)}</td>
+        <td class="num">${fmtCompact(r.volume)}</td>
+        <td class="num">${fmtCompact(r.market_cap)}</td>
+      </tr>`;
+    },
+    tooltipExtras: (row) => {
+      let h = "";
+      if (row && row.high_52w != null)        h += `<div>52W high: $${fmtPrice(row.high_52w)}</div>`;
+      if (row && row.percent_change != null)  h += `<div>Day chg: ${fmtPct(row.percent_change, true)}</div>`;
+      if (row && row.last_price != null)      h += `<div>Last: $${fmtPrice(row.last_price)}</div>`;
+      return h;
+    },
+  },
+  /* SCAFFOLD: CONFIGS END */
+};
+
+/* -------------------------------------------------------------------------
+   Build per-project state
+   ------------------------------------------------------------------------- */
+function buildProjectState(cfg) {
+  const s = Object.assign({}, cfg);
+  if (!cfg.data || !cfg.data.length) { s.empty = true; return s; }
+  s.byDate = d3.group(cfg.data, d => d.snapshot_date);
+  s.dates = [...s.byDate.keys()].sort();
+  s.latestDate = s.dates[s.dates.length - 1];
+  s.latestRows = s.byDate.get(s.latestDate);
+  s.prevDate = s.dates.length > 1 ? s.dates[s.dates.length - 2] : null;
+  s.prevRows = s.prevDate ? s.byDate.get(s.prevDate) : null;
+  s.latestBySymbol = new Map(s.latestRows.map(r => [r.symbol, r]));
+  s.prevBySymbol = s.prevRows ? new Map(s.prevRows.map(r => [r.symbol, r])) : new Map();
+
+  function classify(row) {
+    if (cfg.isBarchart) {
+      const prevRank = s.prevBySymbol.has(row.symbol)
+        ? s.prevBySymbol.get(row.symbol).rank
+        : row.previous_rank;
+      if (prevRank == null) return { dir: "new", delta: null, prevRank: null };
+      const delta = prevRank - row.rank;
+      if (delta > 0) return { dir: "up", delta, prevRank };
+      if (delta < 0) return { dir: "down", delta, prevRank };
+      return { dir: "same", delta: 0, prevRank };
+    }
+    if (!s.prevBySymbol.size) return { dir: "same", delta: 0, prevRank: null };
+    if (!s.prevBySymbol.has(row.symbol)) return { dir: "new", delta: null, prevRank: null };
+    const prevRank = s.prevBySymbol.get(row.symbol).rank;
+    const delta = prevRank - row.rank;
+    if (delta > 0) return { dir: "up", delta, prevRank };
+    if (delta < 0) return { dir: "down", delta, prevRank };
+    return { dir: "same", delta: 0, prevRank };
+  }
+
+  s.enriched = s.latestRows.map(r => Object.assign({}, r, classify(r)));
+  s.droppedRows = s.prevRows
+    ? s.prevRows.filter(r => !s.latestBySymbol.has(r.symbol)).sort((a, b) => a.rank - b.rank)
+    : [];
+  s.WINDOW_DATES = s.dates.slice(-10);
+  const ws = new Set();
+  s.WINDOW_DATES.forEach(d => s.byDate.get(d).forEach(r => ws.add(r.symbol)));
+  s.symList = [...ws].sort();
+  s.color = d3.scaleOrdinal()
+    .domain(s.symList)
+    .range(s.symList.map((_, i) => d3.interpolateSinebow(i / s.symList.length)));
+  s.tileBuckets = {
+    up:      { syms: s.enriched.filter(r => r.dir === "up").map(r => r.symbol),    date: s.latestDate },
+    down:    { syms: s.enriched.filter(r => r.dir === "down").map(r => r.symbol),  date: s.latestDate },
+    same:    { syms: s.enriched.filter(r => r.dir === "same").map(r => r.symbol),  date: s.latestDate },
+    new:     { syms: s.enriched.filter(r => r.dir === "new").map(r => r.symbol),   date: s.latestDate },
+    dropped: { syms: s.droppedRows.map(r => r.symbol),                              date: s.prevDate || s.latestDate },
+  };
+  s.highlightedSyms = new Set();
+  s.activeTile = null;
+  s.dateFilter = "all";
+  s.movementFilter = "all";
+  return s;
+}
+
+const PROJECTS = {};
+PROJECT_ORDER.forEach(id => { PROJECTS[id] = buildProjectState(PROJECT_CONFIGS[id]); });
+
+/* -------------------------------------------------------------------------
+   Render the four top mini-summary panels
+   ------------------------------------------------------------------------- */
+function renderTopPanel(id) {
+  const p = PROJECTS[id];
+  const container = document.getElementById(`panel-${id}`);
+  if (p.empty) {
+    container.innerHTML =
+      `<h2 class="panel-title">${p.title} — Daily Movement Dashboard</h2>` +
+      `<div class="empty">No data yet. Run <code>python3 ${id}/scraper.py</code> first.</div>`;
+    return;
+  }
+
+  const counts = { up: 0, down: 0, same: 0, new: 0 };
+  p.enriched.forEach(r => counts[r.dir]++);
+
+  const snapshotTime = p.latestRows[0].snapshot_time || "";
+  const stats = `
+    <div class="summary-grid">
+      <div class="stat up" data-tile="up" tabindex="0" role="button" title="Click to isolate moved-up stocks on today's column"><div class="label">↑ Moved Up</div><div class="value">${counts.up}</div></div>
+      <div class="stat down" data-tile="down" tabindex="0" role="button" title="Click to isolate moved-down stocks on today's column"><div class="label">↓ Moved Down</div><div class="value">${counts.down}</div></div>
+      <div class="stat same" data-tile="same" tabindex="0" role="button" title="Click to isolate unchanged stocks on today's column"><div class="label">● No Change</div><div class="value">${counts.same}</div></div>
+      <div class="stat new" data-tile="new" tabindex="0" role="button" title="Click to isolate new entries on today's column"><div class="label">★ New Entries</div><div class="value">${counts.new}</div></div>
+      <div class="stat dropped" data-tile="dropped" tabindex="0" role="button" title="Click to isolate dropped stocks at their last appearance"><div class="label">✕ Dropped</div><div class="value">${p.droppedRows.length}</div></div>
+      <div class="stat"><div class="label">Days Tracked</div><div class="value">${p.dates.length}</div></div>
+    </div>
+  `;
+
+  const movers = p.enriched.filter(r => r.dir === "up" || r.dir === "down");
+  const topUp = movers.filter(r => r.dir === "up").sort((a, b) => b.delta - a.delta).slice(0, 5);
+  const topDown = movers.filter(r => r.dir === "down").sort((a, b) => a.delta - b.delta).slice(0, 5);
+  const newEntries = p.enriched.filter(r => r.dir === "new").slice(0, 10);
+  const chip = (text, cls, sym) =>
+    `<span class="chip ${cls}" data-symbol="${sym}" tabindex="0" role="button">${text}</span>`;
+  const labels = p.notableLabels;
+  const parts = [];
+  if (topUp.length) {
+    parts.push(`<strong>${labels.gainers}</strong> ` +
+      topUp.map(r => chip(`${r.symbol} ↑${r.delta} (#${r.prevRank}→#${r.rank})`, "up", r.symbol)).join(""));
+  }
+  if (topDown.length) {
+    parts.push(`<strong>${labels.decliners}</strong> ` +
+      topDown.map(r => chip(`${r.symbol} ↓${Math.abs(r.delta)} (#${r.prevRank}→#${r.rank})`, "down", r.symbol)).join(""));
+  }
+  if (p.droppedRows.length) {
+    parts.push(`<strong>Dropped off top 100:</strong> ` +
+      p.droppedRows.slice(0, 10).map(r => chip(`${r.symbol} (was #${r.rank})`, "dropped", r.symbol)).join("") +
+      (p.droppedRows.length > 10 ? ` <span style="color:var(--muted)">+${p.droppedRows.length - 10} more</span>` : ""));
+  }
+  if (newEntries.length) {
+    parts.push(`<strong>New to top 100:</strong> ` +
+      newEntries.map(r => chip(`${r.symbol} #${r.rank}`, "new", r.symbol)).join(""));
+  }
+  if (!parts.length) {
+    parts.push("Single-day snapshot — run the scraper again tomorrow to see movement.");
+  }
+
+  container.innerHTML =
+    `<div class="panel-title">${p.title} — Daily Movement Dashboard <span class="active-tag" style="display:none">Active</span></div>` +
+    `<div class="last-updated">Last updated: ${p.latestDate} ${snapshotTime} • generated ${p.generatedAt}</div>` +
+    stats +
+    `<div class="notable">${parts.join("<br/>")}</div>`;
+}
+PROJECT_ORDER.forEach(renderTopPanel);
+
+/* -------------------------------------------------------------------------
+   Active project + trajectory chart + detail table
+   ------------------------------------------------------------------------- */
+let activeProject = "barchart100";
+
+function setActiveProject(id) {
+  if (!PROJECTS[id] || PROJECTS[id].empty) return;
+  activeProject = id;
+  document.querySelectorAll(".mini-summary").forEach(el => {
+    const isActive = el.dataset.project === id;
+    el.classList.toggle("active-project", isActive);
+    const tag = el.querySelector(".active-tag");
+    if (tag) tag.style.display = isActive ? "" : "none";
+  });
+  const p = PROJECTS[id];
+  document.getElementById("active-traj-title").textContent = p.title;
+  document.getElementById("active-traj-subtitle").textContent = p.trajectorySubtitle;
+  document.getElementById("active-detail-title").textContent = p.detailTitle;
+  document.getElementById("active-detail-subtitle").textContent = p.detailSubtitle;
+  // Scale chart height to ~12px per rank so labels never collide regardless of project size.
+  document.getElementById("chart").style.height = ((p.maxRank || 100) * 12) + "px";
+  populateDateFilter();
+  document.getElementById("date-filter").value = p.dateFilter;
+  document.getElementById("movement-filter").value = p.movementFilter;
+  renderChart();
+  renderDetail();
+}
+
+function populateDateFilter() {
+  const sel = document.getElementById("date-filter");
+  const p = PROJECTS[activeProject];
+  sel.innerHTML = '<option value="all">All (10 days)</option>';
+  p.WINDOW_DATES.slice().reverse().forEach(d => {
+    const opt = document.createElement("option");
+    opt.value = d;
+    opt.textContent = d;
+    sel.appendChild(opt);
+  });
+  // dropped tile pins to prevDate, which may sit just outside the 10-day window
+  if (p.prevDate && !p.WINDOW_DATES.includes(p.prevDate)) {
+    const opt = document.createElement("option");
+    opt.value = p.prevDate;
+    opt.textContent = p.prevDate;
+    sel.appendChild(opt);
+  }
+  // Sanity: stored dateFilter must still exist as an option.
+  if (p.dateFilter !== "all" && !Array.from(sel.options).some(o => o.value === p.dateFilter)) {
+    p.dateFilter = "all";
+  }
+}
+
+function getVisibleDates(p) {
+  return p.dateFilter === "all" ? p.WINDOW_DATES : [p.dateFilter];
+}
+
+function classifySymbol(p, sym, visibleDates) {
+  if (visibleDates.length === 1) {
+    const d = visibleDates[0];
+    const day = p.byDate.get(d);
+    const row = day ? day.find(r => r.symbol === sym) : null;
+    if (!row) return null;
+    if (p.isBarchart) {
+      if (row.previous_rank == null) return "new";
+      if (row.previous_rank > row.rank) return "up";
+      if (row.previous_rank < row.rank) return "down";
+      return "same";
+    }
+    const idx = p.dates.indexOf(d);
+    const prev = idx > 0 ? p.dates[idx - 1] : null;
+    if (!prev) return "new";
+    const prevRow = p.byDate.get(prev).find(r => r.symbol === sym);
+    if (!prevRow) return "new";
+    if (prevRow.rank > row.rank) return "up";
+    if (prevRow.rank < row.rank) return "down";
+    return "same";
+  }
+  const pts = visibleDates
+    .map(d => { const day = p.byDate.get(d); return day ? day.find(r => r.symbol === sym) : null; })
+    .filter(Boolean);
+  if (pts.length === 0) return null;
+  if (pts.length === 1) return "same";
+  const first = pts[0].rank;
+  const last = pts[pts.length - 1].rank;
+  if (first > last) return "up";
+  if (first < last) return "down";
+  return "same";
+}
+
+function renderChart() {
+  const p = PROJECTS[activeProject];
+  const svg = d3.select("#chart");
+  svg.selectAll("*").remove();
+  const rect = svg.node().getBoundingClientRect();
+  const W = rect.width, H = rect.height;
+  const M = { top: 30, right: 70, bottom: 40, left: 60 };
+  const iw = W - M.left - M.right;
+  const ih = H - M.top - M.bottom;
+  const g = svg.append("g").attr("transform", `translate(${M.left},${M.top})`);
+  const chartDates = getVisibleDates(p);
+  const x = d3.scalePoint().domain(chartDates).range([0, iw]).padding(0.5);
+  // Per-project rank ceiling — lets a top-200 list (e.g. 52WHL) keep rank 200
+  // visible on the y-axis while top-100 projects stay tightly bounded.
+  const maxRank = p.maxRank || 100;
+  const tickStep = maxRank <= 100 ? 10 : 20;
+  const tickValues = [1];
+  for (let v = tickStep; v <= maxRank; v += tickStep) tickValues.push(v);
+  const y = d3.scaleLinear().domain([0.5, maxRank + 0.5]).range([0, ih]);
+
+  g.append("g").attr("class", "grid")
+    .selectAll("line").data(tickValues)
+    .enter().append("line")
+    .attr("x1", 0).attr("x2", iw)
+    .attr("y1", d => y(d)).attr("y2", d => y(d));
+
+  g.append("g").attr("class", "axis")
+    .attr("transform", `translate(0,${ih})`)
+    .call(d3.axisBottom(x).tickFormat(d => d.slice(5)));
+
+  g.append("g").attr("class", "axis")
+    .call(d3.axisLeft(y).tickValues(tickValues).tickFormat(d3.format("d")));
+
+  g.append("text")
+    .attr("x", -M.left + 10).attr("y", -10)
+    .attr("fill", "var(--muted)").attr("font-size", 11)
+    .text(p.rankAxisLabel);
+
+  const series = p.symList.map(sym => {
+    const pts = [];
+    chartDates.forEach(d => {
+      const day = p.byDate.get(d);
+      const row = day ? day.find(r => r.symbol === sym) : null;
+      if (row) pts.push({ date: d, rank: row.rank });
+    });
+    return { sym, pts, dir: classifySymbol(p, sym, chartDates) };
+  })
+    .filter(s => s.pts.length > 0)
+    .filter(s => p.movementFilter === "all" ? true : s.dir === p.movementFilter);
+
+  const info = document.getElementById("chart-dates");
+  const range = chartDates.length === 1
+    ? chartDates[0]
+    : `${chartDates[0]} → ${chartDates[chartDates.length - 1]}`;
+  const movementLabel = p.movementFilter === "up" ? "moved up"
+                      : p.movementFilter === "down" ? "moved down"
+                      : "symbols";
+  info.textContent = `${chartDates.length} day${chartDates.length === 1 ? "" : "s"}: ${range} • ${series.length} ${movementLabel}`;
+
+  const line = d3.line().x(d => x(d.date)).y(d => y(d.rank));
+  const showLines = document.getElementById("toggle-lines").checked;
+  const linesG = g.append("g").attr("class", "lines");
+  const labelsG = g.append("g").attr("class", "labels");
+
+  series.forEach(s => {
+    if (showLines && s.pts.length > 1) {
+      linesG.append("path")
+        .datum(s.pts)
+        .attr("class", "sym-line")
+        .attr("data-sym", s.sym)
+        .attr("stroke", p.color(s.sym))
+        .attr("d", line);
+    }
+    s.pts.forEach(pt => {
+      labelsG.append("text")
+        .attr("class", "sym-label")
+        .attr("data-sym", s.sym)
+        .attr("x", x(pt.date))
+        .attr("y", y(pt.rank))
+        .attr("dy", "0.32em")
+        .attr("text-anchor", "middle")
+        .attr("fill", p.color(s.sym))
+        .text(s.sym)
+        .on("mousemove", (ev) => showTip(ev, p, s.sym, pt))
+        .on("mouseleave", hideTip)
+        .on("click", (ev) => { ev.stopPropagation(); toggleHighlightSymbol(activeProject, s.sym); });
+    });
+  });
+
+  svg.on("click", () => clearHighlight(activeProject));
+  applyHighlight();
+}
+
+/* Highlight state lives per-project so each project remembers its own
+ * isolation when the user switches between top panels. */
+function applyHighlight() {
+  const p = PROJECTS[activeProject];
+  const has = p.highlightedSyms.size > 0;
+  d3.selectAll(".sym-line").classed("hi", false).classed("dim", false);
+  d3.selectAll(".sym-label").classed("hi", false).classed("dim", false);
+  if (has) {
+    d3.selectAll(".sym-line")
+      .classed("hi", function () { return p.highlightedSyms.has(this.dataset.sym); })
+      .classed("dim", function () { return !p.highlightedSyms.has(this.dataset.sym); });
+    d3.selectAll(".sym-label")
+      .classed("hi", function () { return p.highlightedSyms.has(this.dataset.sym); })
+      .classed("dim", function () { return !p.highlightedSyms.has(this.dataset.sym); });
+  }
+  // Refresh tile/chip "active" state across ALL top panels (each project keeps its own).
+  document.querySelectorAll(".mini-summary").forEach(panel => {
+    const id = panel.dataset.project;
+    const proj = PROJECTS[id];
+    if (!proj || proj.empty) return;
+    panel.querySelectorAll(".stat[data-tile]").forEach(el => {
+      el.classList.toggle("active", el.dataset.tile === proj.activeTile);
+    });
+    panel.querySelectorAll(".chip[data-symbol]").forEach(el => {
+      el.classList.toggle("active",
+        proj.activeTile === null && proj.highlightedSyms.size === 1 && proj.highlightedSyms.has(el.dataset.symbol));
+    });
+  });
+}
+
+function toggleHighlightSymbol(projectId, sym) {
+  const p = PROJECTS[projectId];
+  if (p.activeTile === null && p.highlightedSyms.size === 1 && p.highlightedSyms.has(sym)) {
+    p.highlightedSyms = new Set();
+  } else {
+    p.highlightedSyms = new Set([sym]);
+  }
+  p.activeTile = null;
+  if (projectId !== activeProject) setActiveProject(projectId);
+  else applyHighlight();
+}
+
+function toggleHighlightTile(projectId, tileId, syms, dateValue) {
+  const p = PROJECTS[projectId];
+  if (!syms || syms.length === 0) return;
+  if (p.activeTile === tileId) {
+    p.highlightedSyms = new Set();
+    p.activeTile = null;
+    p.dateFilter = "all";
+  } else {
+    p.highlightedSyms = new Set(syms);
+    p.activeTile = tileId;
+    p.dateFilter = dateValue;
+  }
+  if (projectId !== activeProject) {
+    setActiveProject(projectId);
+  } else {
+    populateDateFilter();
+    document.getElementById("date-filter").value = p.dateFilter;
+    renderChart();
+  }
+}
+
+function clearHighlight(projectId) {
+  const p = PROJECTS[projectId];
+  if (p.highlightedSyms.size === 0 && !p.activeTile) return;
+  const wasTile = p.activeTile !== null;
+  p.highlightedSyms = new Set();
+  p.activeTile = null;
+  if (wasTile) {
+    p.dateFilter = "all";
+    document.getElementById("date-filter").value = "all";
+    renderChart();
+  } else {
+    applyHighlight();
+  }
+}
+
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") clearHighlight(activeProject);
+});
+
+/* -------------------------------------------------------------------------
+   Top-panel click wiring: tile/chip → isolate; whitespace → just switch active
+   ------------------------------------------------------------------------- */
+document.querySelectorAll(".mini-summary").forEach(panel => {
+  const projectId = panel.dataset.project;
+  panel.addEventListener("click", (ev) => {
+    if (PROJECTS[projectId].empty) return;
+    const tile = ev.target.closest(".stat[data-tile]");
+    if (tile && panel.contains(tile)) {
+      ev.stopPropagation();
+      const t = tile.dataset.tile;
+      const bucket = PROJECTS[projectId].tileBuckets[t];
+      toggleHighlightTile(projectId, t, bucket.syms, bucket.date);
+      return;
+    }
+    const chip = ev.target.closest(".chip[data-symbol]");
+    if (chip && panel.contains(chip)) {
+      ev.stopPropagation();
+      toggleHighlightSymbol(projectId, chip.dataset.symbol);
+      return;
+    }
+    setActiveProject(projectId);
+  });
+  panel.addEventListener("keydown", (ev) => {
+    if (ev.key !== "Enter" && ev.key !== " ") return;
+    if (PROJECTS[projectId].empty) return;
+    const tile = ev.target.closest(".stat[data-tile]");
+    if (tile && panel.contains(tile)) {
+      ev.preventDefault();
+      const t = tile.dataset.tile;
+      const bucket = PROJECTS[projectId].tileBuckets[t];
+      toggleHighlightTile(projectId, t, bucket.syms, bucket.date);
+      return;
+    }
+    const chip = ev.target.closest(".chip[data-symbol]");
+    if (chip && panel.contains(chip)) {
+      ev.preventDefault();
+      toggleHighlightSymbol(projectId, chip.dataset.symbol);
+      return;
+    }
+    if (ev.target === panel) {
+      ev.preventDefault();
+      setActiveProject(projectId);
+    }
+  });
+});
+
+/* -------------------------------------------------------------------------
+   Chart-control wiring
+   ------------------------------------------------------------------------- */
+document.getElementById("toggle-lines").addEventListener("change", renderChart);
+document.getElementById("date-filter").addEventListener("change", () => {
+  const p = PROJECTS[activeProject];
+  if (p.activeTile) { p.activeTile = null; p.highlightedSyms = new Set(); }
+  p.dateFilter = document.getElementById("date-filter").value;
+  renderChart();
+});
+document.getElementById("movement-filter").addEventListener("change", () => {
+  const p = PROJECTS[activeProject];
+  p.movementFilter = document.getElementById("movement-filter").value;
+  renderChart();
+});
+window.addEventListener("resize", () => {
+  clearTimeout(window.__resize);
+  window.__resize = setTimeout(renderChart, 150);
+});
+
+/* -------------------------------------------------------------------------
+   Tooltip
+   ------------------------------------------------------------------------- */
+const tip = document.getElementById("tooltip");
+function showTip(ev, p, sym, pt) {
+  const day = p.byDate.get(pt.date);
+  const row = day ? day.find(r => r.symbol === sym) : null;
+  let html = `<div style="font-weight:600;color:${p.color(sym)}">${sym} — ${row ? row.name : ""}</div>`;
+  html += `<div>Date: ${pt.date}</div>`;
+  html += `<div>Rank: #${pt.rank}</div>`;
+  if (p.tooltipExtras) html += p.tooltipExtras(row);
+  tip.innerHTML = html;
+  tip.style.left = (ev.clientX + 14) + "px";
+  tip.style.top = (ev.clientY + 14) + "px";
+  tip.style.opacity = 1;
+}
+function hideTip() { tip.style.opacity = 0; }
+
+/* -------------------------------------------------------------------------
+   Detail table
+   ------------------------------------------------------------------------- */
+function renderDetail() {
+  const p = PROJECTS[activeProject];
+  const thead = document.getElementById("data-thead");
+  const tbody = document.getElementById("data-tbody");
+  if (p.empty) {
+    thead.innerHTML = "";
+    tbody.innerHTML = `<tr><td class="empty">No data.</td></tr>`;
+    return;
+  }
+  thead.innerHTML = `<tr>${p.detailColumns.map(c => {
+    const cls = ["sortable"].concat(c.num ? ["num"] : []).join(" ");
+    return `<th class="${cls}" data-sort="${c.key}">${c.label} <span class="sort-indicator"></span></th>`;
+  }).join("")}</tr>`;
+
+  const rows = [...p.enriched].sort((a, b) => {
+    let va, vb;
+    if (p.customSortValue) {
+      const cv = p.customSortValue(p.sortKey, a);
+      if (cv !== undefined) { va = cv; vb = p.customSortValue(p.sortKey, b); }
+    }
+    if (va === undefined) {
+      if (p.sortKey === "movement") {
+        const order = { up: 0, new: 1, same: 2, down: 3 };
+        va = order[a.dir] + (a.delta != null ? a.delta / 100 : 0);
+        vb = order[b.dir] + (b.delta != null ? b.delta / 100 : 0);
+      } else {
+        va = a[p.sortKey];
+        vb = b[p.sortKey];
+      }
+    }
+    if (va == null) va = p.sortAsc ? Infinity : -Infinity;
+    if (vb == null) vb = p.sortAsc ? Infinity : -Infinity;
+    if (typeof va === "string") return p.sortAsc ? va.localeCompare(vb) : vb.localeCompare(va);
+    return p.sortAsc ? va - vb : vb - va;
+  });
+
+  tbody.innerHTML = rows.map(r => p.renderDetailRow(r, p.color)).join("");
+
+  thead.querySelectorAll("th.sortable").forEach(th => {
+    const ind = th.querySelector(".sort-indicator");
+    if (!ind) return;
+    ind.textContent = th.dataset.sort === p.sortKey ? (p.sortAsc ? "▲" : "▼") : "";
+  });
+  thead.querySelectorAll("th.sortable").forEach(th => {
+    th.addEventListener("click", () => {
+      const key = th.dataset.sort;
+      if (p.sortKey === key) p.sortAsc = !p.sortAsc;
+      else { p.sortKey = key; p.sortAsc = true; }
+      renderDetail();
+    });
+  });
+}
+
+/* -------------------------------------------------------------------------
+   Initial render: barchart100 active by default
+   ------------------------------------------------------------------------- */
+setActiveProject("barchart100");
+</script>
+</body>
+</html>
