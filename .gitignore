@@ -19,12 +19,13 @@
 !/dashboard.html
 !/DEPLOY.md
 
-# 3. Re-include the five dashboards wired into the combined view
+# 3. Re-include the dashboards wired into the combined view
 !/52weeknewhigh/
 !/barchart100/
 !/mostactive/
 !/topgainers1m/
 !/topoptions/
+!/overallpicks/
 
 # 4. Inside those folders, drop noise we don't want online
 **/.claude/

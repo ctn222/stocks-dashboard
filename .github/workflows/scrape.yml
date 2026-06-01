@@ -38,7 +38,8 @@ jobs:
         id: scrape
         run: |
           failed=""
-          for proj in 52weeknewhigh barchart100 mostactive topgainers1m topoptions; do
+          # Source feeds first; overallpicks LAST so it reads their fresh data.
+          for proj in 52weeknewhigh barchart100 mostactive topgainers1m topoptions overallpicks; do
             echo "::group::$proj"
             if (cd "$proj" && python3 scraper.py); then
               echo "OK  $proj"

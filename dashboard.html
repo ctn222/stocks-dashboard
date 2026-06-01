@@ -273,6 +273,12 @@
   .mv.down { background: var(--down-bg); color: var(--down); }
   .mv.same { background: var(--same-bg); color: var(--same); }
   .mv.new { background: rgba(59,130,246,0.15); color: var(--accent); }
+  .src-badge { display:inline-block; font-family:"SF Mono",Menlo,monospace; font-size:9px; font-weight:600; padding:1px 5px; margin:1px; border-radius:4px; background:var(--panel-2); border:1px solid var(--border); color:var(--muted); }
+  .src-count { font-family:"SF Mono",Menlo,monospace; font-weight:600; color:var(--accent); }
+  .conv-wrap { display:flex; align-items:center; gap:8px; justify-content:flex-end; }
+  .conv-bar { flex:0 0 56px; height:6px; background:var(--panel-2); border-radius:3px; overflow:hidden; }
+  .conv-bar > div { height:100%; }
+  .conv-val { font-weight:600; min-width:34px; display:inline-block; text-align:right; }
   td.num { font-family: "SF Mono", Menlo, monospace; text-align: right; }
   .sym { font-family: "SF Mono", Menlo, monospace; font-weight: 600; }
 
@@ -348,6 +354,7 @@
 
   <div class="top-panels" id="top-panels">
     <!-- SCAFFOLD: PANELS START -->
+    <div class="mini-summary" data-project="overallpicks" id="panel-overallpicks" tabindex="0"></div>
     <div class="mini-summary" data-project="barchart100" id="panel-barchart100" tabindex="0"></div>
     <div class="mini-summary" data-project="topoptions" id="panel-topoptions" tabindex="0"></div>
     <div class="mini-summary" data-project="mostactive" id="panel-mostactive" tabindex="0"></div>
@@ -393,6 +400,11 @@
 <div class="tooltip" id="tooltip"></div>
 
 <!-- SCAFFOLD: DATA SCRIPTS START -->
+<script src="overallpicks/data.js"></script>
+<script>
+  window.DATA_OVERALLPICKS = window.WEBULL_DATA || [];
+  window.GEN_OVERALLPICKS = window.WEBULL_GENERATED_AT || "";
+</script>
 <script src="barchart100/data.js"></script>
 <script>
   window.DATA_BARCHART = window.BARCHART_DATA || [];
@@ -495,10 +507,64 @@ function mvLabel(r) {
 /* -------------------------------------------------------------------------
    Project configurations
    ------------------------------------------------------------------------- */
-const PROJECT_ORDER = [/* SCAFFOLD: ORDER START */"barchart100", "topoptions", "mostactive", "topgainers1m", "52weeknewhigh"/* SCAFFOLD: ORDER END */];
+const PROJECT_ORDER = [/* SCAFFOLD: ORDER START */"overallpicks", "barchart100", "topoptions", "mostactive", "topgainers1m", "52weeknewhigh"/* SCAFFOLD: ORDER END */];
 
 const PROJECT_CONFIGS = {
   /* SCAFFOLD: CONFIGS START */
+  overallpicks: {
+    title: "Overall Picks Top 100",
+    detailTitle: "Overall Picks Top 100",
+    rankAxisLabel: "Conviction rank (1 = strongest)",
+    trajectorySubtitle: "Rank 1 = highest combined-conviction pick. Click a symbol, summary tile, or notable-movement chip to isolate. Click again or press Esc to reset.",
+    detailSubtitle: "Ranked by a Conviction Score (0–100) that blends breakout, 1-month momentum, trend, participation, and options signals across all five lists — a stock rises only with confluence. Hover a symbol for the breakdown. Click any header to sort.",
+    data: window.DATA_OVERALLPICKS,
+    generatedAt: window.GEN_OVERALLPICKS,
+    notableLabels: { gainers: "Biggest gainers in conviction rank:", decliners: "Biggest decliners in conviction rank:" },
+    detailColumns: [
+      { key: "rank", label: "No.", num: true },
+      { key: "symbol", label: "Symbol" },
+      { key: "name", label: "Name" },
+      { key: "movement", label: "Movement" },
+      { key: "score", label: "Conviction", num: true },
+      { key: "breadth", label: "Signals", num: true },
+      { key: "last_price", label: "Last Price", num: true },
+      { key: "percent_change", label: "% Change", num: true },
+      { key: "pct_change_1m", label: "% Δ 1M", num: true },
+      { key: "market_cap", label: "Market Cap", num: true },
+    ],
+    sortKey: "rank",
+    sortAsc: true,
+    renderDetailRow: (r, color) => {
+      const pctChgColor = r.percent_change > 0 ? "var(--up)" : r.percent_change < 0 ? "var(--down)" : "inherit";
+      const m1Color = r.pct_change_1m > 0 ? "var(--up)" : r.pct_change_1m < 0 ? "var(--down)" : "inherit";
+      const s = r.score == null ? 0 : r.score;
+      const pct = Math.max(0, Math.min(100, s));
+      const hue = 12 + (pct / 100) * 120;
+      const conv = `<div class="conv-wrap"><div class="conv-bar"><div style="width:${pct}%;background:hsl(${hue} 70% 45%)"></div></div><span class="conv-val">${s.toFixed(1)}</span></div>`;
+      const codes = (r.lists || "").split(",").filter(Boolean).map(c => `<span class="src-badge">${c}</span>`).join("");
+      const sig = `<span class="src-count">${r.breadth || 0}/5</span> ${codes}`;
+      return `<tr class="row-${r.dir}">
+        <td class="num">${r.rank}</td>
+        <td class="sym" style="color:${color(r.symbol) || 'inherit'}">${r.symbol}</td>
+        <td>${r.name}</td>
+        <td><span class="mv ${r.dir}">${mvLabel(r)}</span></td>
+        <td class="num">${conv}</td>
+        <td style="text-align:left">${sig}</td>
+        <td class="num">$${fmtPrice(r.last_price)}</td>
+        <td class="num" style="color:${pctChgColor}">${fmtPct(r.percent_change, true)}</td>
+        <td class="num" style="color:${m1Color}">${fmtPct(r.pct_change_1m, true)}</td>
+        <td class="num">${fmtCompact(r.market_cap)}</td>
+      </tr>`;
+    },
+    tooltipExtras: (row) => {
+      if (!row || row.score == null) return "";
+      let h = `<div>Conviction: <b>${row.score.toFixed(1)}</b> (${row.breadth}/5 lists: ${row.lists || "—"})</div>`;
+      [["Breakout", row.s_breakout], ["Momentum", row.s_momentum], ["Trend", row.s_trend], ["Participation", row.s_participation], ["Options", row.s_options]]
+        .filter(p => p[1] > 0).forEach(p => { h += `<div>${p[0]}: ${p[1].toFixed(1)}</div>`; });
+      return h;
+    },
+  },
+
   barchart100: {
     title: "Barchart Top 100",
     detailTitle: "Top 100",
@@ -894,7 +960,7 @@ PROJECT_ORDER.forEach(renderTopPanel);
 /* -------------------------------------------------------------------------
    Active project + trajectory chart + detail table
    ------------------------------------------------------------------------- */
-let activeProject = "barchart100";
+let activeProject = "overallpicks";
 
 function setActiveProject(id) {
   if (!PROJECTS[id] || PROJECTS[id].empty) return;
@@ -1298,7 +1364,7 @@ function renderDetail() {
 /* -------------------------------------------------------------------------
    Initial render: barchart100 active by default
    ------------------------------------------------------------------------- */
-setActiveProject("barchart100");
+setActiveProject("overallpicks");
 </script>
 </body>
 </html>
