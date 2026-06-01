@@ -337,6 +337,17 @@
   }
   .theme-toggle:hover { border-color: var(--accent); }
   .theme-toggle .icon { font-size: 14px; }
+  .header-actions { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
+  .header-buttons { display: flex; align-items: center; gap: 10px; }
+  .update-btn { background: var(--accent); border: 1px solid var(--accent); color: #fff; border-radius: 999px; padding: 6px 16px; font-size: 13px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; font-family: inherit; transition: filter 120ms, opacity 120ms; }
+  .update-btn:hover { filter: brightness(1.08); }
+  .update-btn:disabled { cursor: default; opacity: 0.75; }
+  .update-btn.busy { background: var(--panel-2); color: var(--text); border-color: var(--border); }
+  .update-status { font-size: 12px; color: var(--muted); max-width: 340px; text-align: right; line-height: 1.4; }
+  .update-status.ok { color: var(--up); }
+  .update-status.warn { color: var(--down); }
+  .spin { display: inline-block; animation: spin 1s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
 </style>
 </head>
 <body>
@@ -346,10 +357,19 @@
       <h1>Daily Stocks Data</h1>
       <h2 id="page-subtitle">Click any panel below to load its 10-day trajectory and daily detail.</h2>
     </div>
-    <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Toggle theme">
-      <span class="icon" id="theme-icon">☀︎</span>
-      <span id="theme-label">Light mode</span>
-    </button>
+    <div class="header-actions">
+      <div class="header-buttons">
+        <button id="update-btn" class="update-btn" type="button" aria-label="Update data from sources" title="Re-scrape all feeds via GitHub Actions, then auto-refresh this page">
+          <span id="update-icon">↻</span>
+          <span id="update-label">Update data</span>
+        </button>
+        <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Toggle theme">
+          <span class="icon" id="theme-icon">☀︎</span>
+          <span id="theme-label">Light mode</span>
+        </button>
+      </div>
+      <div class="update-status" id="update-status" aria-live="polite"></div>
+    </div>
   </div>
 
   <div class="top-panels" id="top-panels">
@@ -1362,9 +1382,98 @@ function renderDetail() {
 }
 
 /* -------------------------------------------------------------------------
-   Initial render: barchart100 active by default
+   Initial render: overallpicks active by default
    ------------------------------------------------------------------------- */
 setActiveProject("overallpicks");
+</script>
+
+<script>
+/* -------------------------------------------------------------------------
+   "Update data" button — no-token, uses your GitHub login.
+   Click → opens the scrape workflow's "Run workflow" page in a new tab (you
+   confirm there with your existing GitHub session). This page then polls the
+   live data file and auto-reloads the moment fresh data is published (~1 min).
+   Nothing is stored; no credentials are handled by this page.
+   ------------------------------------------------------------------------- */
+(function setupUpdateButton() {
+  // --- This repo's scrape workflow (edit here if the repo/workflow changes) ---
+  const REPO = "ctn222/stocks-dashboard";
+  const WORKFLOW_FILE = "scrape.yml";
+  const RUN_URL = `https://github.com/${REPO}/actions/workflows/${WORKFLOW_FILE}`;
+  const PROBE = "overallpicks/data.js";   // last file the workflow rewrites each run
+  const POLL_MS = 6000;
+  const TIMEOUT_MS = 6 * 60 * 1000;
+
+  const btn = document.getElementById("update-btn");
+  const label = document.getElementById("update-label");
+  const icon = document.getElementById("update-icon");
+  const statusEl = document.getElementById("update-status");
+  if (!btn) return;
+
+  let baseline = (window.GEN_OVERALLPICKS || "").trim();
+  let polling = false, startedAt = 0, timer = null;
+
+  function setStatus(msg, cls) {
+    statusEl.textContent = msg || "";
+    statusEl.className = "update-status" + (cls ? " " + cls : "");
+  }
+
+  async function liveGeneratedAt() {
+    try {
+      const res = await fetch(`${PROBE}?cb=${Date.now()}`, { cache: "no-store" });
+      if (!res.ok) return null;
+      const m = (await res.text()).match(/WEBULL_GENERATED_AT\s*=\s*"([^"]+)"/);
+      return m ? m[1].trim() : null;
+    } catch (e) { return null; }
+  }
+
+  function stop() { polling = false; if (timer) clearTimeout(timer); timer = null; }
+
+  async function poll() {
+    if (!polling) return;
+    if (Date.now() - startedAt > TIMEOUT_MS) {
+      stop();
+      btn.disabled = false;
+      btn.classList.remove("busy");
+      btn.dataset.mode = "reload";
+      icon.textContent = "↻"; label.textContent = "Reload";
+      setStatus("Taking longer than usual. When the GitHub run finishes, click Reload.", "warn");
+      return;
+    }
+    const gen = await liveGeneratedAt();
+    if (gen) {
+      if (!baseline) { baseline = gen; }          // establish baseline if it was missing
+      else if (gen !== baseline) {                 // a new run has published fresh data
+        stop();
+        icon.textContent = "✓"; label.textContent = "Updated";
+        setStatus("New data is live — reloading…", "ok");
+        setTimeout(() => location.reload(), 800);
+        return;
+      }
+    }
+    const secs = Math.round((Date.now() - startedAt) / 1000);
+    setStatus(`Waiting for GitHub Actions to publish new data… (${secs}s)`);
+    timer = setTimeout(poll, POLL_MS);
+  }
+
+  function startUpdate() {
+    // User-initiated, so the popup is allowed. They click "Run workflow" there.
+    window.open(RUN_URL, "_blank", "noopener");
+    btn.disabled = true;
+    btn.classList.add("busy");
+    icon.innerHTML = '<span class="spin">↻</span>';
+    label.textContent = "Updating…";
+    setStatus("Opened GitHub — click “Run workflow” in that tab. This page refreshes automatically when the new data is live.");
+    polling = true; startedAt = Date.now();
+    poll();
+  }
+
+  btn.addEventListener("click", () => {
+    if (btn.dataset.mode === "reload") { location.reload(); return; }
+    if (polling) return;
+    startUpdate();
+  });
+})();
 </script>
 </body>
 </html>
