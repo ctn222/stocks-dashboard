@@ -319,6 +319,82 @@
     width: 1px; height: 18px; background: var(--border);
   }
 
+  /* ---- Daily Detail filter toolbar (sticky) ---- */
+  .detail-controls {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 14px;
+    align-items: center;
+    font-size: 13px;
+    color: var(--muted);
+    background: var(--panel);
+    padding: 10px 4px;
+    margin-bottom: 6px;
+    border-bottom: 1px solid var(--border);
+  }
+  .detail-controls label { display: inline-flex; align-items: center; gap: 6px; }
+  .detail-controls select,
+  .detail-controls input {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 6px;
+    padding: 4px 8px;
+    font-size: 13px;
+    font-family: inherit;
+  }
+  .detail-controls input[type="number"] { width: 64px; }
+  .detail-controls input[type="text"] { width: 130px; }
+  .detail-controls select:hover,
+  .detail-controls input:hover { border-color: var(--accent); }
+  .detail-controls .divider { width: 1px; height: 18px; background: var(--border); }
+  .detail-controls .fg-label { font-weight: 600; color: var(--text); }
+  .filter-group { display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+  .pricebtn {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 6px;
+    padding: 4px 9px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    font-family: inherit;
+    transition: background 100ms, border-color 100ms;
+  }
+  .pricebtn:hover { border-color: var(--accent); }
+  .pricebtn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+  #filter-reset, #load-history {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 6px;
+    padding: 4px 10px;
+    font-size: 12px;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  #filter-reset:hover, #load-history:hover:not(:disabled) { border-color: var(--accent); }
+  #load-history:disabled { opacity: 0.7; cursor: default; }
+  .asof-badge {
+    display: inline-block;
+    margin-left: 8px;
+    padding: 2px 9px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 600;
+    background: rgba(245,158,11,0.16);
+    color: #f59e0b;
+    border: 1px solid rgba(245,158,11,0.35);
+    vertical-align: middle;
+  }
+  .filter-count { font-family: "SF Mono", Menlo, monospace; font-size: 12px; color: var(--muted); }
+  .detail-jump { color: var(--accent); text-decoration: none; font-size: 12px; }
+  .detail-jump:hover { text-decoration: underline; }
+
   .empty { color: var(--muted); padding: 20px; text-align: center; font-size: 14px; }
 
   .theme-toggle {
@@ -352,7 +428,7 @@
 </head>
 <body>
 <div class="container">
-  <div class="page-header">
+  <div class="page-header" id="top">
     <div>
       <h1>Daily Stocks Data</h1>
       <h2 id="page-subtitle">Click any panel below to load its 10-day trajectory and daily detail.</h2>
@@ -406,9 +482,55 @@
     <svg class="chart" id="chart"></svg>
   </div>
 
-  <div class="panel">
-    <h1 style="font-size:18px">Today's <span id="active-detail-title">—</span> — Daily Detail</h1>
+  <div class="panel" id="detail-panel">
+    <h1 style="font-size:18px" id="active-detail-h1">Today's <span id="active-detail-title">—</span> — Daily Detail</h1>
     <h2 id="active-detail-subtitle">Movement column shows rank change versus previous snapshot. Click any header to sort.</h2>
+    <div class="detail-controls">
+      <label>Section:
+        <select id="section-select"></select>
+      </label>
+      <span class="divider"></span>
+      <label title="View the dashboard as it was on a past day. Movement is measured vs the prior day.">As of:
+        <select id="view-date"></select>
+      </label>
+      <button type="button" id="load-history" title="data.js loads only the most recent days for speed — click to pull the full saved history from data.csv">⤓ Load full history</button>
+      <span class="divider"></span>
+      <span class="filter-group">
+        <span class="fg-label">Price</span>
+        <button type="button" class="pricebtn" data-max="">All</button>
+        <button type="button" class="pricebtn" data-max="1">&lt;$1</button>
+        <button type="button" class="pricebtn" data-max="5">&lt;$5</button>
+        <button type="button" class="pricebtn" data-max="10">&lt;$10</button>
+        <button type="button" class="pricebtn" data-max="20">&lt;$20</button>
+        <input type="number" id="price-min" placeholder="min $" min="0" step="0.01" />
+        <input type="number" id="price-max" placeholder="max $" min="0" step="0.01" />
+      </span>
+      <span class="divider"></span>
+      <label>Movement:
+        <select id="detail-move">
+          <option value="all">All</option>
+          <option value="new">★ New</option>
+          <option value="up">▲ Up</option>
+          <option value="down">▼ Down</option>
+          <option value="same">— Unchanged</option>
+        </select>
+      </label>
+      <span class="divider"></span>
+      <label>% Change:
+        <select id="chg-dir">
+          <option value="any">Any</option>
+          <option value="up">Up ≥</option>
+          <option value="down">Down ≥</option>
+        </select>
+        <input type="number" id="chg-pct" placeholder="%" min="0" step="0.5" /> %
+      </label>
+      <span class="divider"></span>
+      <label>Search: <input type="text" id="detail-q" placeholder="symbol / name" /></label>
+      <button type="button" id="filter-reset">Reset</button>
+      <span id="filter-count" class="filter-count"></span>
+      <span class="divider"></span>
+      <a class="detail-jump" href="#top">↑ Top</a>
+    </div>
     <div>
       <table class="data-table" id="data-table">
         <thead id="data-thead"></thead>
@@ -536,7 +658,7 @@ const PROJECT_CONFIGS = {
     detailTitle: "Overall Picks Top 100",
     rankAxisLabel: "Conviction rank (1 = strongest)",
     trajectorySubtitle: "Rank 1 = highest combined-conviction pick. Click a symbol, summary tile, or notable-movement chip to isolate. Click again or press Esc to reset.",
-    detailSubtitle: "Ranked by a Conviction Score (0–100) that blends breakout, 1-month momentum, trend, participation, and options signals across all five lists — a stock rises only with confluence. Hover a symbol for the breakdown. Click any header to sort.",
+    detailSubtitle: "Ranked by a Conviction Score (0–100) that blends breakout, 1-month momentum, participation, options, and trend signals, then applies a confluence multiplier so stocks lighting up across multiple lists rank highest. Hover a symbol for the breakdown. Click any header to sort.",
     data: window.DATA_OVERALLPICKS,
     generatedAt: window.GEN_OVERALLPICKS,
     notableLabels: { gainers: "Biggest gainers in conviction rank:", decliners: "Biggest decliners in conviction rank:" },
@@ -857,15 +979,33 @@ function buildProjectState(cfg) {
   if (!cfg.data || !cfg.data.length) { s.empty = true; return s; }
   s.byDate = d3.group(cfg.data, d => d.snapshot_date);
   s.dates = [...s.byDate.keys()].sort();
-  s.latestDate = s.dates[s.dates.length - 1];
+  s.liveDate = s.dates[s.dates.length - 1];   // newest snapshot actually on disk
+  s.viewDate = s.liveDate;                     // which day the panel is currently showing
+  s.highlightedSyms = new Set();
+  s.activeTile = null;
+  s.dateFilter = "all";
+  s.movementFilter = "all";
+  computeView(s, s.viewDate);
+  return s;
+}
+
+/* Recompute the "current view" (detail table, movers, 10-day window, colors)
+   as of `asOfDate`. Default is the newest snapshot; pass an older date to
+   time-travel. Movement is always measured against the prior available day. */
+function computeView(s, asOfDate) {
+  const dates = s.dates;
+  let i = dates.indexOf(asOfDate);
+  if (i < 0) i = dates.length - 1;
+  s.viewDate = dates[i];
+  s.latestDate = dates[i];
   s.latestRows = s.byDate.get(s.latestDate);
-  s.prevDate = s.dates.length > 1 ? s.dates[s.dates.length - 2] : null;
+  s.prevDate = i > 0 ? dates[i - 1] : null;
   s.prevRows = s.prevDate ? s.byDate.get(s.prevDate) : null;
   s.latestBySymbol = new Map(s.latestRows.map(r => [r.symbol, r]));
   s.prevBySymbol = s.prevRows ? new Map(s.prevRows.map(r => [r.symbol, r])) : new Map();
 
-  function classify(row) {
-    if (cfg.isBarchart) {
+  const classify = (row) => {
+    if (s.isBarchart) {
       const prevRank = s.prevBySymbol.has(row.symbol)
         ? s.prevBySymbol.get(row.symbol).rank
         : row.previous_rank;
@@ -882,19 +1022,19 @@ function buildProjectState(cfg) {
     if (delta > 0) return { dir: "up", delta, prevRank };
     if (delta < 0) return { dir: "down", delta, prevRank };
     return { dir: "same", delta: 0, prevRank };
-  }
+  };
 
   s.enriched = s.latestRows.map(r => Object.assign({}, r, classify(r)));
   s.droppedRows = s.prevRows
     ? s.prevRows.filter(r => !s.latestBySymbol.has(r.symbol)).sort((a, b) => a.rank - b.rank)
     : [];
-  s.WINDOW_DATES = s.dates.slice(-10);
+  s.WINDOW_DATES = dates.slice(Math.max(0, i - 9), i + 1);   // up to 10 days ending at view
   const ws = new Set();
   s.WINDOW_DATES.forEach(d => s.byDate.get(d).forEach(r => ws.add(r.symbol)));
   s.symList = [...ws].sort();
   s.color = d3.scaleOrdinal()
     .domain(s.symList)
-    .range(s.symList.map((_, i) => d3.interpolateSinebow(i / s.symList.length)));
+    .range(s.symList.map((_, k) => d3.interpolateSinebow(k / s.symList.length)));
   s.tileBuckets = {
     up:      { syms: s.enriched.filter(r => r.dir === "up").map(r => r.symbol),    date: s.latestDate },
     down:    { syms: s.enriched.filter(r => r.dir === "down").map(r => r.symbol),  date: s.latestDate },
@@ -902,11 +1042,56 @@ function buildProjectState(cfg) {
     new:     { syms: s.enriched.filter(r => r.dir === "new").map(r => r.symbol),   date: s.latestDate },
     dropped: { syms: s.droppedRows.map(r => r.symbol),                              date: s.prevDate || s.latestDate },
   };
-  s.highlightedSyms = new Set();
-  s.activeTile = null;
-  s.dateFilter = "all";
-  s.movementFilter = "all";
-  return s;
+}
+
+/* Coerce a raw CSV row (all strings) into the same typed shape as data.js. */
+const VIEW_STRING_KEYS = new Set(["snapshot_date", "snapshot_time", "symbol", "name", "lists"]);
+function coerceCsvRow(d) {
+  const o = {};
+  for (const k in d) {
+    const v = d[k];
+    if (VIEW_STRING_KEYS.has(k)) { o[k] = v; continue; }
+    if (v === "" || v == null) { o[k] = null; continue; }
+    const n = +v;
+    o[k] = Number.isNaN(n) ? v : n;
+  }
+  return o;
+}
+
+/* Lazy-load the full saved history (data.csv) for a feed. data.js only embeds
+   the most recent days for fast initial load; this pulls the rest on demand. */
+async function loadFullHistory(id) {
+  const p = PROJECTS[id];
+  if (!p || p.empty || p.fullLoaded || p._loadingHistory) return;
+  p._loadingHistory = true;
+  const btn = document.getElementById("load-history");
+  if (id === activeProject) { btn.disabled = true; btn.textContent = "Loading…"; }
+  try {
+    const text = await fetch(`${id}/data.csv`, { cache: "no-store" })
+      .then(r => { if (!r.ok) throw new Error("HTTP " + r.status); return r.text(); });
+    const cfg = PROJECT_CONFIGS[id];
+    cfg.data = d3.csvParse(text, coerceCsvRow);
+    const prevView = p.viewDate;
+    const rebuilt = buildProjectState(cfg);
+    rebuilt.fullLoaded = true;
+    if (rebuilt.dates.includes(prevView)) computeView(rebuilt, prevView);
+    PROJECTS[id] = rebuilt;
+    renderTopPanel(id);
+    if (id === activeProject) {
+      markActivePanel();
+      populateDateFilter();
+      populateViewDates();
+      updateViewLabels(rebuilt);
+      renderChart();
+      renderDetail();
+    }
+    btn.textContent = `✓ Full history (${rebuilt.dates.length} days)`;
+    btn.disabled = true;
+  } catch (err) {
+    console.error("loadFullHistory", id, err);
+    if (id === activeProject) { btn.disabled = false; btn.textContent = "⚠ Retry full history"; }
+    p._loadingHistory = false;
+  }
 }
 
 const PROJECTS = {};
@@ -982,25 +1167,79 @@ PROJECT_ORDER.forEach(renderTopPanel);
    ------------------------------------------------------------------------- */
 let activeProject = "overallpicks";
 
-function setActiveProject(id) {
-  if (!PROJECTS[id] || PROJECTS[id].empty) return;
-  activeProject = id;
+function markActivePanel() {
   document.querySelectorAll(".mini-summary").forEach(el => {
-    const isActive = el.dataset.project === id;
+    const isActive = el.dataset.project === activeProject;
     el.classList.toggle("active-project", isActive);
     const tag = el.querySelector(".active-tag");
     if (tag) tag.style.display = isActive ? "" : "none";
   });
+}
+
+/* Reflect whether we're viewing today's snapshot or time-traveling. */
+function updateViewLabels(p) {
+  const asOf = p.viewDate;
+  const isLive = asOf === p.liveDate;
+  document.getElementById("active-traj-title").textContent =
+    p.title + (isLive ? "" : `  ·  as of ${asOf}`);
+  document.getElementById("active-detail-h1").innerHTML = isLive
+    ? `Today's ${p.detailTitle} — Daily Detail`
+    : `${p.detailTitle} — Daily Detail <span class="asof-badge">as of ${asOf}</span>`;
+}
+
+function populateViewDates() {
+  const sel = document.getElementById("view-date");
+  const p = PROJECTS[activeProject];
+  if (!sel) return;
+  sel.innerHTML = "";
+  p.dates.slice().reverse().forEach(d => {
+    const opt = document.createElement("option");
+    opt.value = d;
+    opt.textContent = d === p.liveDate ? `${d} (latest)` : d;
+    sel.appendChild(opt);
+  });
+  sel.value = p.viewDate;
+  const btn = document.getElementById("load-history");
+  if (btn) {
+    if (p.fullLoaded) { btn.disabled = true; btn.textContent = `✓ Full history (${p.dates.length} days)`; }
+    else { btn.disabled = false; btn.textContent = "⤓ Load full history"; }
+  }
+}
+
+/* Time-travel the active panel to a chosen snapshot date. */
+function rebaseActive(date) {
+  const p = PROJECTS[activeProject];
+  if (!p || p.empty) return;
+  p.highlightedSyms = new Set();
+  p.activeTile = null;
+  p.dateFilter = "all";
+  computeView(p, date);
+  renderTopPanel(activeProject);
+  markActivePanel();
+  populateDateFilter();
+  document.getElementById("date-filter").value = "all";
+  document.getElementById("chart").style.height = ((p.maxRank || 100) * 12) + "px";
+  updateViewLabels(p);
+  renderChart();
+  renderDetail();
+}
+
+function setActiveProject(id) {
+  if (!PROJECTS[id] || PROJECTS[id].empty) return;
+  activeProject = id;
+  markActivePanel();
   const p = PROJECTS[id];
-  document.getElementById("active-traj-title").textContent = p.title;
+  updateViewLabels(p);
   document.getElementById("active-traj-subtitle").textContent = p.trajectorySubtitle;
-  document.getElementById("active-detail-title").textContent = p.detailTitle;
   document.getElementById("active-detail-subtitle").textContent = p.detailSubtitle;
   // Scale chart height to ~12px per rank so labels never collide regardless of project size.
   document.getElementById("chart").style.height = ((p.maxRank || 100) * 12) + "px";
   populateDateFilter();
+  populateViewDates();
   document.getElementById("date-filter").value = p.dateFilter;
   document.getElementById("movement-filter").value = p.movementFilter;
+  const secSel = document.getElementById("section-select");
+  if (secSel) secSel.value = id;
   renderChart();
   renderDetail();
 }
@@ -1364,7 +1603,11 @@ function renderDetail() {
     return p.sortAsc ? va - vb : vb - va;
   });
 
-  tbody.innerHTML = rows.map(r => p.renderDetailRow(r, p.color)).join("");
+  const visible = rows.filter(passesDetailFilter);
+  tbody.innerHTML = visible.length
+    ? visible.map(r => p.renderDetailRow(r, p.color)).join("")
+    : `<tr><td class="empty" colspan="${p.detailColumns.length}">No rows match the current filters.</td></tr>`;
+  updateFilterCount(visible.length, rows.length);
 
   thead.querySelectorAll("th.sortable").forEach(th => {
     const ind = th.querySelector(".sort-indicator");
@@ -1382,8 +1625,108 @@ function renderDetail() {
 }
 
 /* -------------------------------------------------------------------------
+   Daily Detail filters (price / movement / % change / search)
+   ------------------------------------------------------------------------- */
+const detailFilters = { priceMin: null, priceMax: null, move: "all", chgDir: "any", chgPct: null, q: "" };
+
+function passesDetailFilter(r) {
+  const f = detailFilters;
+  const price = r.last_price;
+  if (f.priceMin != null && (price == null || price < f.priceMin)) return false;
+  if (f.priceMax != null && (price == null || price > f.priceMax)) return false;
+  if (f.move !== "all" && r.dir !== f.move) return false;
+  if (f.chgDir !== "any") {
+    const c = r.percent_change;
+    if (c == null) return false;
+    const thr = f.chgPct != null ? f.chgPct : 0;
+    if (f.chgDir === "up" && !(c >= thr)) return false;
+    if (f.chgDir === "down" && !(c <= -thr)) return false;
+  }
+  if (f.q) {
+    const hay = ((r.symbol || "") + " " + (r.name || "")).toLowerCase();
+    if (!hay.includes(f.q)) return false;
+  }
+  return true;
+}
+
+function updateFilterCount(shown, total) {
+  const el = document.getElementById("filter-count");
+  if (el) el.textContent = shown === total ? `${total} stocks` : `${shown} of ${total}`;
+}
+
+function syncPriceButtons() {
+  document.querySelectorAll(".pricebtn").forEach(b => {
+    const v = b.dataset.max === "" ? null : Number(b.dataset.max);
+    // A preset is "active" when only a max is set (no custom min) and it matches.
+    b.classList.toggle("active", detailFilters.priceMin == null && detailFilters.priceMax === v);
+  });
+}
+
+function numOrNull(v) { const n = parseFloat(v); return Number.isFinite(n) ? n : null; }
+
+function wireDetailFilters() {
+  // Section switcher (jump between feeds without scrolling to the top panels)
+  const sec = document.getElementById("section-select");
+  sec.innerHTML = PROJECT_ORDER
+    .filter(id => !PROJECTS[id].empty)
+    .map(id => `<option value="${id}">${PROJECTS[id].title}</option>`).join("");
+  sec.addEventListener("change", () => setActiveProject(sec.value));
+
+  // As-of date (time travel) + lazy full-history loader
+  document.getElementById("view-date").addEventListener("change", e => rebaseActive(e.target.value));
+  document.getElementById("load-history").addEventListener("click", () => loadFullHistory(activeProject));
+
+  const priceMin = document.getElementById("price-min");
+  const priceMax = document.getElementById("price-max");
+
+  document.querySelectorAll(".pricebtn").forEach(b => {
+    b.addEventListener("click", () => {
+      detailFilters.priceMin = null;
+      detailFilters.priceMax = b.dataset.max === "" ? null : Number(b.dataset.max);
+      priceMin.value = "";
+      priceMax.value = b.dataset.max;
+      syncPriceButtons();
+      renderDetail();
+    });
+  });
+  [priceMin, priceMax].forEach(inp => inp.addEventListener("input", () => {
+    detailFilters.priceMin = numOrNull(priceMin.value);
+    detailFilters.priceMax = numOrNull(priceMax.value);
+    syncPriceButtons();
+    renderDetail();
+  }));
+
+  document.getElementById("detail-move").addEventListener("change", e => {
+    detailFilters.move = e.target.value; renderDetail();
+  });
+  document.getElementById("chg-dir").addEventListener("change", e => {
+    detailFilters.chgDir = e.target.value; renderDetail();
+  });
+  document.getElementById("chg-pct").addEventListener("input", e => {
+    detailFilters.chgPct = numOrNull(e.target.value); renderDetail();
+  });
+  document.getElementById("detail-q").addEventListener("input", e => {
+    detailFilters.q = e.target.value.trim().toLowerCase(); renderDetail();
+  });
+
+  document.getElementById("filter-reset").addEventListener("click", () => {
+    Object.assign(detailFilters, { priceMin: null, priceMax: null, move: "all", chgDir: "any", chgPct: null, q: "" });
+    priceMin.value = ""; priceMax.value = "";
+    document.getElementById("detail-move").value = "all";
+    document.getElementById("chg-dir").value = "any";
+    document.getElementById("chg-pct").value = "";
+    document.getElementById("detail-q").value = "";
+    syncPriceButtons();
+    renderDetail();
+  });
+
+  syncPriceButtons();
+}
+
+/* -------------------------------------------------------------------------
    Initial render: overallpicks active by default
    ------------------------------------------------------------------------- */
+wireDetailFilters();
 setActiveProject("overallpicks");
 </script>
 

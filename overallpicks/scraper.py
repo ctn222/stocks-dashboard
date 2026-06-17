@@ -14,26 +14,35 @@ Output (same shape as the other dashboards so the UI is identical):
     data.js   — window.WEBULL_DATA / window.WEBULL_GENERATED_AT
 
 ---------------------------------------------------------------------------
-SCORING MODEL  (transparent, rank-percentile based, robust to outliers)
+SCORING MODEL v2  (rank-percentile based, robust to outliers; 2026-06)
 ---------------------------------------------------------------------------
 Each of the five lists contributes weighted points based on how strong a
-stock's signal is *within that list*. A stock only reaches the top of the
-Overall Picks if it shows up strong across MULTIPLE lists (confluence) — a
-single-list appearance is capped at that list's weight.
+stock's signal is *within that list*. The whole score is then multiplied by a
+CONFLUENCE bonus that scales with how many lists the stock appears on, so a
+name showing strong momentum across MULTIPLE live-attention lists is pushed
+well above a stock that merely ranks high on a single list.
 
-    ConvictionScore(sym) = 100 * Σ_{list L present}  weight_L * signal_L(sym)
+    base(sym)  = 100 * Σ_{list L present}  weight_L * signal_L(sym)
+    conf(sym)  = 1 + CONFLUENCE_BONUS * (breadth - 1)        # breadth = #lists
+    Conviction = min(100, base * conf)
 
     signal_L ∈ [0,1] per list:
-      52-Week New High (w=0.25, "breakout"):
+      52-Week New High (w=0.24, "breakout"):
           0.40*rankPct + 0.35*proximityToHigh + 0.25*pctChangePct
-      Top Gainers 1M  (w=0.25, "momentum"):
+      Top Gainers 1M  (w=0.24, "momentum"):
           0.70*pctChange1M_pct + 0.30*rankPct
-      Barchart Top100 (w=0.20, "trend"):
-          0.55*weightedAlphaPct + 0.25*pctChangePct + 0.20*rankClimb
-      Most Active     (w=0.15, "participation"):
+      Most Active     (w=0.18, "participation"):
           0.40*turnoverPct + 0.20*volumePct + 0.40*pctChangePct
-      Options Vol 100 (w=0.15, "options"):
+      Options Vol 100 (w=0.18, "options"):
           0.40*optionVolPct + 0.35*callBias + 0.25*pctChangePct
+      Barchart Top100 (w=0.16, "trend"):
+          0.55*weightedAlphaPct + 0.25*pctChangePct + 0.20*rankClimb
+
+v2 vs v1: the four live-attention/momentum lists (New High, Gainers, Active,
+Options) now carry more weight, Barchart less, and the confluence multiplier
+is new. The aggregator also emits base_score / conf_mult / score_v1 columns
+so the old and new rankings can be audited side-by-side. All knobs live in the
+TUNABLE KNOBS block below.
 
 `rankPct`/`*Pct` are percentile ranks within that list's latest snapshot
 (so the scale of each raw metric doesn't matter). Index/ETF tickers that only
@@ -53,14 +62,42 @@ APPS = HERE.parent
 CSV_PATH = HERE / "data.csv"
 JS_PATH = HERE / "data.js"
 
+# ───────────────────────────── TUNABLE KNOBS ──────────────────────────────
 # (folder, short code, weight, component-key)
+#
+# v2 reweighting (2026-06): the four "momentum / live-attention" lists the
+# desk cares about most — 52-week New High, Top Gainers 1M, Most Active, Top
+# Options — now carry the bulk of the weight; Barchart Top 100 is kept as a
+# slower trend confirmation at a reduced weight. Weights are normalized to
+# sum to 1.0 at runtime, so you can edit these freely without rescaling.
 FEEDS = [
-    ("52weeknewhigh", "52WH", 0.25, "breakout"),
-    ("topgainers1m",  "1M",   0.25, "momentum"),
-    ("barchart100",   "BC",   0.20, "trend"),
-    ("mostactive",    "ACT",  0.15, "participation"),
-    ("topoptions",    "OPT",  0.15, "options"),
+    ("52weeknewhigh", "52WH", 0.24, "breakout"),       # was 0.25
+    ("topgainers1m",  "1M",   0.24, "momentum"),        # was 0.25
+    ("mostactive",    "ACT",  0.18, "participation"),   # was 0.15  ↑
+    ("topoptions",    "OPT",  0.18, "options"),         # was 0.15  ↑
+    ("barchart100",   "BC",   0.16, "trend"),           # was 0.20  ↓
 ]
+
+# Confluence multiplier — the headline v2 change.
+# A stock's base score is multiplied by (1 + CONFLUENCE_BONUS * (breadth - 1)),
+# where breadth = how many of the 5 lists it appears on. This explicitly
+# rewards stocks that show up across MULTIPLE momentum lists, exactly the
+# behavior requested: a 4/5 or 5/5 confluence name is pushed well above a
+# stock that merely ranks high on a single list.
+#   breadth 1 → ×1.00   breadth 3 → ×1.36
+#   breadth 2 → ×1.18   breadth 4 → ×1.54   breadth 5 → ×1.72
+CONFLUENCE_BONUS = 0.18
+
+# Final scores are clamped to this ceiling so the 0–100 reading still holds
+# even after the confluence multiplier is applied.
+SCORE_CAP = 100.0
+
+# Speed: the dashboard only ever renders the last ~10 snapshots, so data.js
+# (loaded on every page view) carries only the most recent N days. The full
+# history is preserved in data.csv. This caps page weight and stops data.js
+# from growing without bound.
+HISTORY_DAYS_IN_JS = 15
+# ───────────────────────────────────────────────────────────────────────────
 
 OUT_FIELDS = [
     "snapshot_date", "snapshot_time", "rank", "symbol", "name",
@@ -68,11 +105,14 @@ OUT_FIELDS = [
     "high_52w", "pct_change_1m", "weighted_alpha",
     "score", "breadth", "lists",
     "s_breakout", "s_momentum", "s_trend", "s_participation", "s_options",
+    # v2 review columns (ignored by the dashboard, kept for side-by-side audit)
+    "base_score", "conf_mult", "score_v1",
 ]
 INT_FIELDS = {"rank", "breadth", "volume", "market_cap"}
 FLOAT_FIELDS = {
     "last_price", "percent_change", "high_52w", "pct_change_1m", "weighted_alpha",
     "score", "s_breakout", "s_momentum", "s_trend", "s_participation", "s_options",
+    "base_score", "conf_mult", "score_v1",
 }
 
 
@@ -267,21 +307,37 @@ def build_picks(top_n: int = 100):
         universe.update(feed_data[feed_id].keys())
 
     comp_key = {feed_id: comp for feed_id, _, _, comp in FEEDS}
-    weight_of = {feed_id: w for feed_id, _, w, _ in FEEDS}
     code_of = {feed_id: c for feed_id, c, _, _ in FEEDS}
+
+    # Normalize the v2 weights so they sum to 1.0 (lets you edit FEEDS freely).
+    raw_w = {feed_id: w for feed_id, _, w, _ in FEEDS}
+    wsum = sum(raw_w.values()) or 1.0
+    weight_of = {fid: w / wsum for fid, w in raw_w.items()}
+    # v1 (original) weights, kept ONLY to emit score_v1 for side-by-side review.
+    V1_WEIGHTS = {"52weeknewhigh": 0.25, "topgainers1m": 0.25,
+                  "barchart100": 0.20, "mostactive": 0.15, "topoptions": 0.15}
 
     picks = []
     for sym in universe:
         comps = {"breakout": 0.0, "momentum": 0.0, "trend": 0.0,
                  "participation": 0.0, "options": 0.0}
-        lists, score = [], 0.0
+        lists, base_score, score_v1 = [], 0.0, 0.0
         for feed_id in present_feeds:
             if sym in feed_data[feed_id]:
                 sig = feed_signal[feed_id].get(sym, 0.0)
-                pts = weight_of[feed_id] * sig * 100
-                comps[comp_key[feed_id]] = pts
-                score += pts
+                comps[comp_key[feed_id]] = weight_of[feed_id] * sig * 100
+                base_score += weight_of[feed_id] * sig * 100
+                score_v1 += V1_WEIGHTS[feed_id] * sig * 100
                 lists.append(code_of[feed_id])
+
+        breadth = len(lists)
+        conf_mult = 1.0 + CONFLUENCE_BONUS * (breadth - 1) if breadth else 0.0
+        score = clamp(base_score * conf_mult, 0.0, SCORE_CAP)
+        # Scale the per-component bars by the same multiplier so the hover
+        # breakdown still sums (pre-cap) to the displayed conviction score.
+        for k in comps:
+            comps[k] *= conf_mult
+
         picks.append({
             "symbol": sym,
             "name": pick_name(sym, feed_data, field_order),
@@ -294,13 +350,16 @@ def build_picks(top_n: int = 100):
             "pct_change_1m": pick(sym, "pct_change_1m", feed_data, field_order),
             "weighted_alpha": pick(sym, "weighted_alpha", feed_data, field_order),
             "score": round(score, 1),
-            "breadth": len(lists),
+            "breadth": breadth,
             "lists": ",".join(lists),
             "s_breakout": round(comps["breakout"], 1),
             "s_momentum": round(comps["momentum"], 1),
             "s_trend": round(comps["trend"], 1),
             "s_participation": round(comps["participation"], 1),
             "s_options": round(comps["options"], 1),
+            "base_score": round(base_score, 1),
+            "conf_mult": round(conf_mult, 3),
+            "score_v1": round(score_v1, 1),
         })
 
     # Sort by score desc, then breadth desc, then symbol for stability.
@@ -347,8 +406,14 @@ def write_outputs(picks, snapshot_date, snapshot_time):
             w.writerow({k: ("" if r.get(k) is None else r.get(k)) for k in OUT_FIELDS})
 
     # data.js — coerce types so the dashboard gets numbers, not strings.
+    # Only embed the most recent HISTORY_DAYS_IN_JS snapshots (full history
+    # stays in data.csv); the dashboard never looks back further than that.
+    recent_dates = sorted({r.get("snapshot_date", "") for r in history})[-HISTORY_DAYS_IN_JS:]
+    recent = set(recent_dates)
     js_rows = []
     for r in history:
+        if r.get("snapshot_date") not in recent:
+            continue
         js_rows.append({k: coerce(k, r.get(k)) for k in OUT_FIELDS})
     gen = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     with JS_PATH.open("w", encoding="utf-8") as f:

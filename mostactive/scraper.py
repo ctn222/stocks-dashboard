@@ -18,6 +18,11 @@ HERE = Path(__file__).resolve().parent
 CSV_PATH = HERE / "data.csv"
 JS_PATH = HERE / "data.js"
 
+# Speed: data.js (loaded on every page view) embeds only the most recent
+# N snapshots; the dashboard never looks back further than ~10 days. Full
+# history is preserved in data.csv. Caps page weight + stops unbounded growth.
+HISTORY_DAYS_IN_JS = 15
+
 API_URL = (
     "https://quotes-gw.webullfintech.com/api/wlas/ranking/topActive"
     "?regionId=6&rankType=volume&pageIndex=1&pageSize=100"
@@ -150,6 +155,11 @@ def write_js_bundle() -> None:
                         "market_cap": int(row["market_cap"]) if row["market_cap"] else None,
                     }
                 )
+
+    # Keep only the last HISTORY_DAYS_IN_JS snapshots in the JS bundle.
+    if history:
+        _recent = set(sorted({r["snapshot_date"] for r in history})[-HISTORY_DAYS_IN_JS:])
+        history = [r for r in history if r["snapshot_date"] in _recent]
 
     generated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S %Z").strip()
     body = (

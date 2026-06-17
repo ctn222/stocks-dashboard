@@ -21,6 +21,11 @@ HERE = Path(__file__).resolve().parent
 CSV_PATH = HERE / "data.csv"
 JS_PATH = HERE / "data.js"
 
+# Speed: data.js (loaded on every page view) embeds only the most recent
+# N snapshots; the dashboard never looks back further than ~10 days. Full
+# history is preserved in data.csv. Caps page weight + stops unbounded growth.
+HISTORY_DAYS_IN_JS = 15
+
 PAGE_URL = "https://www.barchart.com/stocks/top-100-stocks"
 API_URL = "https://www.barchart.com/proxies/core-api/v1/quotes/get"
 LIST_ID = "stocks.us.weighted_alpha.advances"
@@ -160,6 +165,11 @@ def write_js_bundle() -> None:
                         "weighted_alpha": float(row["weighted_alpha"]) if row["weighted_alpha"] else None,
                     }
                 )
+
+    # Keep only the last HISTORY_DAYS_IN_JS snapshots in the JS bundle.
+    if history:
+        _recent = set(sorted({r["snapshot_date"] for r in history})[-HISTORY_DAYS_IN_JS:])
+        history = [r for r in history if r["snapshot_date"] in _recent]
 
     generated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S %Z").strip()
     body = (
