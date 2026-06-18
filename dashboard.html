@@ -287,6 +287,9 @@
   .conv-val { font-weight:600; min-width:34px; display:inline-block; text-align:right; }
   td.num { font-family: "SF Mono", Menlo, monospace; text-align: right; }
   .sym { font-family: "SF Mono", Menlo, monospace; font-weight: 600; }
+  .sym-link { text-decoration: none; cursor: pointer; border-bottom: 1px dotted transparent; }
+  .sym-link:hover { border-bottom-color: currentColor; }
+  .sym-link:hover::after { content: " ↗"; font-size: 9px; opacity: 0.7; }
 
   .pc {
     display: inline-block;
@@ -652,6 +655,17 @@ function mvLabel(r) {
          r.dir === "new"  ? `★ NEW`         : `— 0`;
 }
 
+// Finviz daily-chart URL for a ticker (opens in a new tab).
+function finvizUrl(sym) {
+  return `https://finviz.com/stock?t=${encodeURIComponent(sym)}&p=d`;
+}
+// Render a ticker as a Finviz link, keeping its trajectory color.
+function symLink(sym, color) {
+  const c = color || "inherit";
+  return `<a class="sym-link" href="${finvizUrl(sym)}" target="_blank" rel="noopener noreferrer" `
+       + `title="Open ${sym} on Finviz ↗" style="color:${c}">${sym}</a>`;
+}
+
 /* -------------------------------------------------------------------------
    Project configurations
    ------------------------------------------------------------------------- */
@@ -704,7 +718,7 @@ const PROJECT_CONFIGS = {
       const sig = `<span class="src-count">${r.breadth || 0}/5</span> ${codes}${carried}${fresh}`;
       return `<tr class="row-${r.dir}">
         <td class="num">${r.rank}</td>
-        <td class="sym" style="color:${color(r.symbol) || 'inherit'}">${r.symbol}</td>
+        <td class="sym">${symLink(r.symbol, color(r.symbol))}</td>
         <td>${r.name}</td>
         <td><span class="mv ${r.dir}">${mvLabel(r)}</span></td>
         <td class="num">${conv}</td>
@@ -762,7 +776,7 @@ const PROJECT_CONFIGS = {
       const pct = r.high_52w ? ((r.last_price / r.high_52w) * 100).toFixed(1) + "%" : "—";
       const pctChgColor = r.percent_change > 0 ? 'var(--up)' : r.percent_change < 0 ? 'var(--down)' : 'inherit';
       return `<tr class="row-${r.dir}">
-        <td class="sym" style="color:${color(r.symbol) || 'inherit'}">${r.symbol}</td>
+        <td class="sym">${symLink(r.symbol, color(r.symbol))}</td>
         <td>${r.name}</td>
         <td><span class="mv ${r.dir}">${mvLabel(r)}</span></td>
         <td class="num">${r.weighted_alpha != null ? r.weighted_alpha.toFixed(2) : "—"}</td>
@@ -810,7 +824,7 @@ const PROJECT_CONFIGS = {
       const pctChgColor = r.percent_change > 0 ? "var(--up)" : r.percent_change < 0 ? "var(--down)" : "inherit";
       return `<tr class="row-${r.dir}">
         <td class="num">${r.rank}</td>
-        <td class="sym" style="color:${color(r.symbol) || 'inherit'}">${r.symbol}</td>
+        <td class="sym">${symLink(r.symbol, color(r.symbol))}</td>
         <td>${r.name}</td>
         <td><span class="mv ${r.dir}">${mvLabel(r)}</span></td>
         <td class="num">${fmtCompact(r.option_volume)}</td>
@@ -865,7 +879,7 @@ const PROJECT_CONFIGS = {
       const pctChgColor = r.percent_change > 0 ? "var(--up)" : r.percent_change < 0 ? "var(--down)" : "inherit";
       return `<tr class="row-${r.dir}">
         <td class="num">${r.rank}</td>
-        <td class="sym" style="color:${color(r.symbol) || 'inherit'}">${r.symbol}</td>
+        <td class="sym">${symLink(r.symbol, color(r.symbol))}</td>
         <td>${r.name}</td>
         <td><span class="mv ${r.dir}">${mvLabel(r)}</span></td>
         <td class="num">${fmtCompact(r.volume)}</td>
@@ -915,7 +929,7 @@ const PROJECT_CONFIGS = {
       const pctChgColor = r.pct_change_1m > 0 ? "var(--up)" : r.pct_change_1m < 0 ? "var(--down)" : "inherit";
       return `<tr class="row-${r.dir}">
         <td class="num">${r.rank}</td>
-        <td class="sym" style="color:${color(r.symbol) || 'inherit'}">${r.symbol}</td>
+        <td class="sym">${symLink(r.symbol, color(r.symbol))}</td>
         <td>${r.name}</td>
         <td><span class="mv ${r.dir}">${mvLabel(r)}</span></td>
         <td class="num" style="color:${pctChgColor}">${fmtPctVar(r.pct_change_1m, true)}</td>
@@ -968,7 +982,7 @@ const PROJECT_CONFIGS = {
       const lcrColor = r.last_change_ratio > 0 ? "var(--up)" : r.last_change_ratio < 0 ? "var(--down)" : "inherit";
       return `<tr class="row-${r.dir}">
         <td class="num">${r.rank}</td>
-        <td class="sym" style="color:${color(r.symbol) || 'inherit'}">${r.symbol}</td>
+        <td class="sym">${symLink(r.symbol, color(r.symbol))}</td>
         <td>${r.name}</td>
         <td><span class="mv ${r.dir}">${mvLabel(r)}</span></td>
         <td class="num">$${fmtPrice(r.last_price)}</td>
