@@ -274,6 +274,8 @@
   .mv.same { background: var(--same-bg); color: var(--same); }
   .mv.new { background: rgba(59,130,246,0.15); color: var(--accent); }
   .src-badge { display:inline-block; font-family:"SF Mono",Menlo,monospace; font-size:9px; font-weight:600; padding:1px 5px; margin:1px; border-radius:4px; background:var(--panel-2); border:1px solid var(--border); color:var(--muted); }
+  /* a list the stock recently dropped off but is still carrying decayed credit (consolidating) */
+  .src-badge.consolidating { background:transparent; border-style:dashed; color:var(--muted); opacity:0.8; cursor:help; }
   .src-count { font-family:"SF Mono",Menlo,monospace; font-weight:600; color:var(--accent); }
   .conv-wrap { display:flex; align-items:center; gap:8px; justify-content:flex-end; }
   .conv-bar { flex:0 0 56px; height:6px; background:var(--panel-2); border-radius:3px; overflow:hidden; }
@@ -684,7 +686,9 @@ const PROJECT_CONFIGS = {
       const hue = 12 + (pct / 100) * 120;
       const conv = `<div class="conv-wrap"><div class="conv-bar"><div style="width:${pct}%;background:hsl(${hue} 70% 45%)"></div></div><span class="conv-val">${s.toFixed(1)}</span></div>`;
       const codes = (r.lists || "").split(",").filter(Boolean).map(c => `<span class="src-badge">${c}</span>`).join("");
-      const sig = `<span class="src-count">${r.breadth || 0}/5</span> ${codes}`;
+      const carried = (r.carried_lists || "").split(",").filter(Boolean)
+        .map(c => `<span class="src-badge consolidating" title="Recently on ${c} — consolidating (carrying decayed credit, not a fresh signal)">~${c}</span>`).join("");
+      const sig = `<span class="src-count">${r.breadth || 0}/5</span> ${codes}${carried}`;
       return `<tr class="row-${r.dir}">
         <td class="num">${r.rank}</td>
         <td class="sym" style="color:${color(r.symbol) || 'inherit'}">${r.symbol}</td>
@@ -701,6 +705,7 @@ const PROJECT_CONFIGS = {
     tooltipExtras: (row) => {
       if (!row || row.score == null) return "";
       let h = `<div>Conviction: <b>${row.score.toFixed(1)}</b> (${row.breadth}/5 lists: ${row.lists || "—"})</div>`;
+      if (row.carried_lists) h += `<div style="color:var(--muted)">Consolidating off: ${row.carried_lists} (carrying decayed credit)</div>`;
       [["Breakout", row.s_breakout], ["Momentum", row.s_momentum], ["Trend", row.s_trend], ["Participation", row.s_participation], ["Options", row.s_options]]
         .filter(p => p[1] > 0).forEach(p => { h += `<div>${p[0]}: ${p[1].toFixed(1)}</div>`; });
       return h;

@@ -92,6 +92,23 @@ CONFLUENCE_BONUS = 0.18
 # even after the confluence multiplier is applied.
 SCORE_CAP = 100.0
 
+# List-membership decay (anti-whiplash, 2026-06).
+# Lists like Most Active churn daily on raw volume, so a stock at the edge can
+# flicker on/off and its conviction (and rank) would lurch even when price is
+# flat. Instead of dropping a list's contribution to zero the moment a stock
+# leaves it, we carry a DECAYING fraction of that stock's last signal on the
+# list for a few days. A name that was on a list yesterday still gets
+# MEMBERSHIP_DECAY of its credit today, MEMBERSHIP_DECAY² the next day, etc.,
+# until it ages out of MEMBERSHIP_WINDOW. This smooths the slide (e.g. a
+# #6→#66 one-day drop becomes a multi-day glide) without changing which list a
+# stock is *actually* on today (the displayed `breadth`/`lists` stay factual;
+# only the score and the confluence multiplier use the decayed "soft" breadth).
+#   decay 0.7, window 3 ⇒ carried credit 0.70 (1d), 0.49 (2d), 0.34 (3d), 0 after
+# A name that leaves a list is usually consolidating, not collapsing, so the
+# credit fades slowly (0.7 ≈ keeps most of its weight the day after it drops).
+MEMBERSHIP_DECAY = 0.7
+MEMBERSHIP_WINDOW = 3   # how many prior snapshots a dropped list keeps fading over
+
 # Speed: the dashboard only ever renders the last ~10 snapshots, so data.js
 # (loaded on every page view) carries only the most recent N days. The full
 # history is preserved in data.csv. This caps page weight and stops data.js
@@ -105,14 +122,17 @@ OUT_FIELDS = [
     "high_52w", "pct_change_1m", "weighted_alpha",
     "score", "breadth", "lists",
     "s_breakout", "s_momentum", "s_trend", "s_participation", "s_options",
+    # lists the stock was on within MEMBERSHIP_WINDOW days but NOT today (still
+    # carrying decayed credit) — i.e. consolidating off that list.
+    "carried_lists",
     # v2 review columns (ignored by the dashboard, kept for side-by-side audit)
-    "base_score", "conf_mult", "score_v1",
+    "base_score", "conf_mult", "score_v1", "eff_breadth",
 ]
 INT_FIELDS = {"rank", "breadth", "volume", "market_cap"}
 FLOAT_FIELDS = {
     "last_price", "percent_change", "high_52w", "pct_change_1m", "weighted_alpha",
     "score", "s_breakout", "s_momentum", "s_trend", "s_participation", "s_options",
-    "base_score", "conf_mult", "score_v1",
+    "base_score", "conf_mult", "score_v1", "eff_breadth",
 }
 
 
@@ -143,10 +163,14 @@ def read_latest(feed_id: str):
     if not rows:
         return None, {}
     latest = max(r.get("snapshot_date", "") for r in rows)
-    # Keep the BEST (lowest rank) row per symbol within the latest snapshot.
+    return latest, _best_by_symbol(rows, latest)
+
+
+def _best_by_symbol(rows, date):
+    """Best (lowest-rank) row per symbol within a single snapshot date."""
     best = {}
     for r in rows:
-        if r.get("snapshot_date") != latest:
+        if r.get("snapshot_date") != date:
             continue
         sym = (r.get("symbol") or "").strip().upper()
         if not sym:
@@ -158,7 +182,28 @@ def read_latest(feed_id: str):
             cur = to_float(best[sym].get("rank"))
             if rk is not None and (cur is None or rk < cur):
                 best[sym] = r
-    return latest, best
+    return best
+
+
+def read_recent(feed_id: str, k: int, as_of: str | None = None):
+    """Return up to `k` most recent snapshots as [(date, {symbol: row}), ...],
+    newest first. If `as_of` is given, only snapshots on/before that date are
+    considered (so history can be recomputed "as of" a past day). [] if empty."""
+    path = APPS / feed_id / "data.csv"
+    if not path.exists():
+        return []
+    try:
+        with path.open(newline="", encoding="utf-8") as f:
+            rows = list(csv.DictReader(f))
+    except OSError:
+        return []
+    if not rows:
+        return []
+    dates = sorted({r.get("snapshot_date", "") for r in rows if r.get("snapshot_date")}, reverse=True)
+    if as_of is not None:
+        dates = [d for d in dates if d <= as_of]
+    dates = dates[:k]
+    return [(d, _best_by_symbol(rows, d)) for d in dates]
 
 
 def percentiles(values: dict, missing: float = 0.4) -> dict:
@@ -280,21 +325,32 @@ def pick_name(symbol, feed_data, order):
     return symbol
 
 
-def build_picks(top_n: int = 100):
-    feed_data = {}        # feed_id -> {symbol: row}
-    feed_signal = {}      # feed_id -> {symbol: signal[0,1]}
+def build_picks(top_n: int = 100, as_of: str | None = None):
+    feed_data = {}        # feed_id -> {symbol: row}   (today's snapshot, for display)
+    feed_member = {}      # feed_id -> {symbol: (age, signal[0,1], presence_weight)}
     feed_date = {}
     present_feeds = []
     for feed_id, code, weight, comp in FEEDS:
-        date, latest = read_latest(feed_id)
-        feed_data[feed_id] = latest
-        feed_date[feed_id] = date
-        if latest:
-            feed_signal[feed_id] = SIGNAL_FN[comp](latest)
-            present_feeds.append(feed_id)
-        else:
-            feed_signal[feed_id] = {}
+        snaps = read_recent(feed_id, MEMBERSHIP_WINDOW + 1, as_of=as_of)   # newest first; [0] = "today"
+        if not snaps:
+            feed_data[feed_id] = {}
+            feed_member[feed_id] = {}
+            feed_date[feed_id] = None
             print(f"  [warn] {feed_id}: no data found", file=sys.stderr)
+            continue
+        feed_date[feed_id] = snaps[0][0]
+        feed_data[feed_id] = snaps[0][1]
+        present_feeds.append(feed_id)
+        # Signal map for each snapshot (percentiles are within that day's list).
+        sigmaps = [SIGNAL_FN[comp](rows) for _, rows in snaps]
+        # Most-recent presence per symbol → decayed credit (age 0 = on the list today).
+        member = {}
+        for age, (_, rows) in enumerate(snaps):
+            pw = MEMBERSHIP_DECAY ** age
+            for sym in rows:
+                if sym not in member:            # first sighting walking back = most recent
+                    member[sym] = (age, sigmaps[age].get(sym, 0.0), pw)
+        feed_member[feed_id] = member
 
     if not present_feeds:
         raise SystemExit("[overallpicks] No source data found in any sibling feed. Run the 5 scrapers first.")
@@ -302,6 +358,7 @@ def build_picks(top_n: int = 100):
     # Priority order for pulling display fields: by feed weight (highest first).
     field_order = [f[0] for f in sorted(FEEDS, key=lambda x: -x[2])]
 
+    # Universe = stocks on at least one list TODAY (decayed-only names don't resurrect).
     universe = set()
     for feed_id in present_feeds:
         universe.update(feed_data[feed_id].keys())
@@ -321,17 +378,28 @@ def build_picks(top_n: int = 100):
     for sym in universe:
         comps = {"breakout": 0.0, "momentum": 0.0, "trend": 0.0,
                  "participation": 0.0, "options": 0.0}
-        lists, base_score, score_v1 = [], 0.0, 0.0
+        lists, carried, base_score, score_v1, eff_breadth = [], [], 0.0, 0.0, 0.0
         for feed_id in present_feeds:
-            if sym in feed_data[feed_id]:
-                sig = feed_signal[feed_id].get(sym, 0.0)
-                comps[comp_key[feed_id]] = weight_of[feed_id] * sig * 100
-                base_score += weight_of[feed_id] * sig * 100
-                score_v1 += V1_WEIGHTS[feed_id] * sig * 100
+            m = feed_member[feed_id].get(sym)
+            if m is None:
+                continue
+            age, sig, pw = m
+            # Decayed credit: full weight when on the list today (age 0, pw 1.0),
+            # a fading fraction for a few days after the stock drops off.
+            contribution = weight_of[feed_id] * sig * pw * 100
+            comps[comp_key[feed_id]] = contribution
+            base_score += contribution
+            eff_breadth += pw
+            if age == 0:                          # genuinely on the list today
                 lists.append(code_of[feed_id])
+                score_v1 += V1_WEIGHTS[feed_id] * sig * 100
+            else:                                 # recently dropped — consolidating
+                carried.append(code_of[feed_id])
 
-        breadth = len(lists)
-        conf_mult = 1.0 + CONFLUENCE_BONUS * (breadth - 1) if breadth else 0.0
+        breadth = len(lists)                       # factual: # of lists present TODAY
+        # Confluence multiplier uses the decayed "soft" breadth so a one-day list
+        # drop doesn't yank the multiplier down with it.
+        conf_mult = 1.0 + CONFLUENCE_BONUS * (eff_breadth - 1) if eff_breadth else 0.0
         score = clamp(base_score * conf_mult, 0.0, SCORE_CAP)
         # Scale the per-component bars by the same multiplier so the hover
         # breakdown still sums (pre-cap) to the displayed conviction score.
@@ -352,6 +420,7 @@ def build_picks(top_n: int = 100):
             "score": round(score, 1),
             "breadth": breadth,
             "lists": ",".join(lists),
+            "carried_lists": ",".join(carried),
             "s_breakout": round(comps["breakout"], 1),
             "s_momentum": round(comps["momentum"], 1),
             "s_trend": round(comps["trend"], 1),
@@ -360,10 +429,11 @@ def build_picks(top_n: int = 100):
             "base_score": round(base_score, 1),
             "conf_mult": round(conf_mult, 3),
             "score_v1": round(score_v1, 1),
+            "eff_breadth": round(eff_breadth, 2),
         })
 
-    # Sort by score desc, then breadth desc, then symbol for stability.
-    picks.sort(key=lambda p: (-p["score"], -p["breadth"], p["symbol"]))
+    # Sort by score desc, then effective breadth desc, then symbol for stability.
+    picks.sort(key=lambda p: (-p["score"], -p["eff_breadth"], p["symbol"]))
     picks = picks[:top_n]
     for i, p in enumerate(picks, start=1):
         p["rank"] = i
@@ -388,15 +458,19 @@ def load_history():
         return list(csv.DictReader(f))
 
 
-def write_outputs(picks, snapshot_date, snapshot_time):
-    # Merge: drop any existing rows for today, then append today's picks.
-    history = [r for r in load_history() if r.get("snapshot_date") != snapshot_date]
+def _rows_for(picks, snapshot_date, snapshot_time):
+    out = []
     for p in picks:
         row = {"snapshot_date": snapshot_date, "snapshot_time": snapshot_time}
         for k in OUT_FIELDS:
             if k not in row:
                 row[k] = p.get(k)
-        history.append(row)
+        out.append(row)
+    return out
+
+
+def _persist(history):
+    """Write the full history to data.csv and a recent-window slice to data.js."""
     history.sort(key=lambda r: (r.get("snapshot_date", ""), int(to_float(r.get("rank")) or 0)))
 
     with CSV_PATH.open("w", newline="", encoding="utf-8") as f:
@@ -408,13 +482,9 @@ def write_outputs(picks, snapshot_date, snapshot_time):
     # data.js — coerce types so the dashboard gets numbers, not strings.
     # Only embed the most recent HISTORY_DAYS_IN_JS snapshots (full history
     # stays in data.csv); the dashboard never looks back further than that.
-    recent_dates = sorted({r.get("snapshot_date", "") for r in history})[-HISTORY_DAYS_IN_JS:]
-    recent = set(recent_dates)
-    js_rows = []
-    for r in history:
-        if r.get("snapshot_date") not in recent:
-            continue
-        js_rows.append({k: coerce(k, r.get(k)) for k in OUT_FIELDS})
+    recent = set(sorted({r.get("snapshot_date", "") for r in history})[-HISTORY_DAYS_IN_JS:])
+    js_rows = [{k: coerce(k, r.get(k)) for k in OUT_FIELDS}
+               for r in history if r.get("snapshot_date") in recent]
     gen = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     with JS_PATH.open("w", encoding="utf-8") as f:
         f.write("// Auto-generated by scraper.py (Overall Picks aggregator) — do not edit by hand.\n")
@@ -424,7 +494,47 @@ def write_outputs(picks, snapshot_date, snapshot_time):
         f.write(";\n")
 
 
+def write_outputs(picks, snapshot_date, snapshot_time):
+    # Merge: drop any existing rows for today, then append today's picks.
+    history = [r for r in load_history() if r.get("snapshot_date") != snapshot_date]
+    history.extend(_rows_for(picks, snapshot_date, snapshot_time))
+    _persist(history)
+
+
+def backfill() -> int:
+    """Recompute the ENTIRE existing overallpicks history under the current
+    model (replaying each date via build_picks(as_of=date)), so the whole
+    trajectory is formula-consistent. Source market data is untouched; only the
+    derived score/rank/components change. One-time, idempotent."""
+    existing = load_history()
+    if not existing:
+        raise SystemExit("[overallpicks] No existing history to backfill. Run normally first.")
+    # Preserve each date's original generated timestamp; keep the same date set.
+    time_for, dates = {}, []
+    for r in existing:
+        d = r.get("snapshot_date")
+        if d and d not in time_for:
+            time_for[d] = r.get("snapshot_time") or d
+            dates.append(d)
+    dates.sort()
+
+    new_history = []
+    print(f"[overallpicks] Backfilling {len(dates)} dates under current model "
+          f"(decay={MEMBERSHIP_DECAY}, window={MEMBERSHIP_WINDOW})…")
+    for d in dates:
+        picks, _ = build_picks(top_n=100, as_of=d)
+        new_history.extend(_rows_for(picks, d, time_for.get(d, d)))
+        top = picks[0] if picks else None
+        print(f"    {d}: {len(picks)} picks" + (f"  (#1 {top['symbol']} {top['score']})" if top else ""))
+    _persist(new_history)
+    print(f"  Rewrote {CSV_PATH.name} ({len(new_history)} rows across {len(dates)} dates) and {JS_PATH.name}")
+    return 0
+
+
 def main() -> int:
+    if "--backfill" in sys.argv[1:]:
+        return backfill()
+
     now = datetime.now().astimezone()
     snapshot_date = now.strftime("%Y-%m-%d")
     snapshot_time = now.strftime("%Y-%m-%d %H:%M:%S %Z").strip()
