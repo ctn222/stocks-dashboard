@@ -5,45 +5,53 @@ one reads the latest snapshot from all five and computes a single **Conviction
 Score (0–100)** ranking which stocks have the strongest confluence of bullish
 signals — i.e. the highest probability of continuing higher.
 
-## How the score works (v2 — confluence-weighted, 2026-06)
+## How the score works (v3 — options-led, 2026-06)
 
 ```
-base       = 100 × Σ_{list L the stock is on}  weight_L × signalStrength_L
-confluence = 1 + 0.18 × (breadth − 1)             # breadth = # of lists
-ConvictionScore = min(100, base × confluence)
+base       = 100 × Σ_{list L present}  weight_L × signalStrength_L   (decayed credit)
+confluence = 1 + 0.18 × (effBreadth − 1)        # soft breadth incl. decayed lists
+kicker     = flow × fresh                        # targeted options-led bonuses
+ConvictionScore = min(100, base × confluence × kicker)
 ```
 
 Each list contributes weighted points scaled by how strong the stock's signal is
-*within that list* (measured as a percentile rank, so raw-metric scales don't
-matter). The whole base is then multiplied by a **confluence bonus** that grows
-with how many lists the stock appears on — so a stock showing strong momentum
-across **multiple** live-attention lists is pushed well above one that merely
-ranks high on a single list.
+*within that list* (percentile rank, so raw-metric scales don't matter). The base
+is multiplied by a **confluence bonus** (more lists → higher) and then by two
+**targeted kickers**.
 
-| Source list | Signal captured | Weight (v2) | was (v1) |
+| Source list | Signal captured | Weight (v3) | v2 |
 |---|---|---|---|
-| Webull 52-Week New High | breakout: near 52w high, freshness, day strength | **24** | 25 |
-| Webull Top Gainers (1M) | sustained 1-month momentum | **24** | 25 |
-| Webull Most Active | participation: turnover/volume + up-day | **18** ↑ | 15 |
-| Webull Options Total Volume 100 | positioning: call-heavy put/call + option volume | **18** ↑ | 15 |
-| Barchart Top 100 | trend: weighted-alpha + rank climb + day strength | **16** ↓ | 20 |
+| Webull Options Total Volume 100 | **bullish/bearish positioning (P/C Vol + P/C OI) + option volume** | **24** ↑ | 18 |
+| Webull 52-Week New High | breakout: near 52w high, freshness, day strength | **22** | 24 |
+| Webull Top Gainers (1M) | sustained 1-month momentum | **22** | 24 |
+| Webull Most Active | participation: turnover/volume + up-day | **18** | 18 |
+| Barchart Top 100 | trend: weighted-alpha + rank climb + day strength | **14** | 16 |
 
-**Confluence multiplier:** breadth 1 → ×1.00, 2 → ×1.18, 3 → ×1.36,
-4 → ×1.54, 5 → ×1.72.
+**Options signal** now leads with directionality: `0.30·optionVol + 0.45·bias +
+0.25·dayChange`, where `bias` blends **P/C Vol (0.6)** and **P/C OI (0.4)** — a
+call-heavy name scores high, a put-heavy one is discounted.
 
-**Why v2:** the four live-attention/momentum lists (New High, Gainers, Active,
-Options) now carry the bulk of the weight, Barchart is kept only as a slower
-trend confirmation, and the confluence multiplier explicitly rewards stocks
-that light up across several lists at once.
+**Confluence multiplier:** effBreadth 1 → ×1.00 … 5 → ×1.72 (uses the decayed
+"soft" breadth so a one-day list drop doesn't whipsaw the score).
 
-`breadth` = how many of the five lists the stock is on. Index/ETF tickers (e.g.
-SPY) that only show on Active/Options with neutral signals naturally score low.
+**Kickers (options-led):**
+- **Flow ×1.15** — on the **Options *and* Most-Active** lists *and* bullishly
+  positioned (`opt_bias ≥ 0.55`). Options flow meeting real trading volume.
+- **Fresh ×1.15** — appearing for the **first time today on 3+ lists at once**
+  (`new_count ≥ 3`) — the multi-list breakouts where options-led moves start.
+  The two stack (e.g. a fresh, bullish OPT+ACT name ⇒ ×1.32).
+
+`breadth`/`lists` stay factual (lists present today); a recently-dropped list
+shows as a dashed `~CODE` **consolidating** badge carrying decayed credit. The
+OPT badge is tinted **green (bullish) / red (bearish)** by its P/C read.
 
 ### Tuning & auditing
 All knobs live in the **`TUNABLE KNOBS`** block at the top of `scraper.py`
-(`FEEDS` weights, `CONFLUENCE_BONUS`, `SCORE_CAP`, `HISTORY_DAYS_IN_JS`). Every
-output row also carries `base_score`, `conf_mult`, and `score_v1` so you can
-compare the new ranking against the old one on identical data.
+(`FEEDS` weights, `CONFLUENCE_BONUS`, `MEMBERSHIP_DECAY`/`WINDOW`, `FLOW_BONUS`,
+`FRESH_BONUS`/`FRESH_MIN_LISTS`, `SCORE_CAP`, `HISTORY_DAYS_IN_JS`). Every output
+row carries audit columns `base_score`, `conf_mult`, `score_v1`, `eff_breadth`,
+`opt_bias`, `new_count`, `kicker`, and `carried_lists`. After changing a knob,
+run `python3 scraper.py --backfill` to restate the whole history consistently.
 
 > This is a heuristic momentum/confluence screen, **not** investment advice.
 

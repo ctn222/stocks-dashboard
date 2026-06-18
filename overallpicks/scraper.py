@@ -14,35 +14,39 @@ Output (same shape as the other dashboards so the UI is identical):
     data.js   — window.WEBULL_DATA / window.WEBULL_GENERATED_AT
 
 ---------------------------------------------------------------------------
-SCORING MODEL v2  (rank-percentile based, robust to outliers; 2026-06)
+SCORING MODEL v3  (options-led; rank-percentile based; 2026-06)
 ---------------------------------------------------------------------------
-Each of the five lists contributes weighted points based on how strong a
-stock's signal is *within that list*. The whole score is then multiplied by a
-CONFLUENCE bonus that scales with how many lists the stock appears on, so a
-name showing strong momentum across MULTIPLE live-attention lists is pushed
-well above a stock that merely ranks high on a single list.
+Each list contributes weighted points by how strong a stock's signal is
+*within that list*. The base is multiplied by a CONFLUENCE bonus (more lists →
+higher) and two targeted, options-led KICKERS.
 
-    base(sym)  = 100 * Σ_{list L present}  weight_L * signal_L(sym)
-    conf(sym)  = 1 + CONFLUENCE_BONUS * (breadth - 1)        # breadth = #lists
-    Conviction = min(100, base * conf)
+    base(sym)  = 100 * Σ_{list L present}  weight_L * signal_L(sym)   (decayed)
+    conf(sym)  = 1 + CONFLUENCE_BONUS * (effBreadth - 1)
+    kicker     = flow * fresh
+    Conviction = min(100, base * conf * kicker)
 
     signal_L ∈ [0,1] per list:
-      52-Week New High (w=0.24, "breakout"):
+      Options Vol 100 (w=0.24, "options"):
+          0.30*optionVolPct + 0.45*optionsBias + 0.25*pctChangePct
+          optionsBias = 0.6*callBias(P/C Vol) + 0.4*callBias(P/C OI)
+      52-Week New High (w=0.22, "breakout"):
           0.40*rankPct + 0.35*proximityToHigh + 0.25*pctChangePct
-      Top Gainers 1M  (w=0.24, "momentum"):
+      Top Gainers 1M  (w=0.22, "momentum"):
           0.70*pctChange1M_pct + 0.30*rankPct
       Most Active     (w=0.18, "participation"):
           0.40*turnoverPct + 0.20*volumePct + 0.40*pctChangePct
-      Options Vol 100 (w=0.18, "options"):
-          0.40*optionVolPct + 0.35*callBias + 0.25*pctChangePct
-      Barchart Top100 (w=0.16, "trend"):
+      Barchart Top100 (w=0.14, "trend"):
           0.55*weightedAlphaPct + 0.25*pctChangePct + 0.20*rankClimb
 
-v2 vs v1: the four live-attention/momentum lists (New High, Gainers, Active,
-Options) now carry more weight, Barchart less, and the confluence multiplier
-is new. The aggregator also emits base_score / conf_mult / score_v1 columns
-so the old and new rankings can be audited side-by-side. All knobs live in the
-TUNABLE KNOBS block below.
+    flow  = 1 + FLOW_BONUS  if on Options AND Most-Active AND bullish (call-heavy)
+    fresh = 1 + FRESH_BONUS if NEW on FRESH_MIN_LISTS+ lists today (new_count≥3)
+
+v3 vs v2: options now lead (weight ↑, signal driven by P/C Vol + P/C OI
+directionality); a flow kicker rewards the options∩most-active bullish setup;
+a fresh kicker rewards brand-new multi-list breakouts. Audit columns:
+base_score, conf_mult, score_v1, eff_breadth, opt_bias, new_count, kicker,
+carried_lists. (effBreadth = decayed "soft" breadth — see MEMBERSHIP_DECAY.)
+All knobs live in the TUNABLE KNOBS block below.
 
 `rankPct`/`*Pct` are percentile ranks within that list's latest snapshot
 (so the scale of each raw metric doesn't matter). Index/ETF tickers that only
@@ -71,11 +75,11 @@ JS_PATH = HERE / "data.js"
 # slower trend confirmation at a reduced weight. Weights are normalized to
 # sum to 1.0 at runtime, so you can edit these freely without rescaling.
 FEEDS = [
-    ("52weeknewhigh", "52WH", 0.24, "breakout"),       # was 0.25
-    ("topgainers1m",  "1M",   0.24, "momentum"),        # was 0.25
-    ("mostactive",    "ACT",  0.18, "participation"),   # was 0.15  ↑
-    ("topoptions",    "OPT",  0.18, "options"),         # was 0.15  ↑
-    ("barchart100",   "BC",   0.16, "trend"),           # was 0.20  ↓
+    ("topoptions",    "OPT",  0.24, "options"),         # v3: ↑ options drive price
+    ("52weeknewhigh", "52WH", 0.22, "breakout"),
+    ("topgainers1m",  "1M",   0.22, "momentum"),
+    ("mostactive",    "ACT",  0.18, "participation"),
+    ("barchart100",   "BC",   0.14, "trend"),
 ]
 
 # Confluence multiplier — the headline v2 change.
@@ -109,6 +113,20 @@ SCORE_CAP = 100.0
 MEMBERSHIP_DECAY = 0.7
 MEMBERSHIP_WINDOW = 3   # how many prior snapshots a dropped list keeps fading over
 
+# Targeted kickers (v3, 2026-06) — options-led, applied on top of base × confluence.
+#
+# FLOW_BONUS — "options drive price": a stock on BOTH the Options-Volume list and
+# the Most-Active list, AND positioned bullishly (call-heavy P/C Vol+OI), gets a
+# multiplicative boost. This is the options-flow-meets-real-trading setup.
+FLOW_BONUS = 0.15
+FLOW_BULLISH_MIN = 0.55   # options_bias above this counts as bullish for the bonus
+
+# FRESH_BONUS — a brand-new multi-list breakout: if a stock is appearing for the
+# first time today on FRESH_MIN_LISTS or more lists at once, give it a boost
+# (these "new on 3+ charts" names are where options-led moves often start).
+FRESH_BONUS = 0.15
+FRESH_MIN_LISTS = 3
+
 # Speed: the dashboard only ever renders the last ~10 snapshots, so data.js
 # (loaded on every page view) carries only the most recent N days. The full
 # history is preserved in data.csv. This caps page weight and stops data.js
@@ -125,14 +143,15 @@ OUT_FIELDS = [
     # lists the stock was on within MEMBERSHIP_WINDOW days but NOT today (still
     # carrying decayed credit) — i.e. consolidating off that list.
     "carried_lists",
-    # v2 review columns (ignored by the dashboard, kept for side-by-side audit)
+    # v2/v3 review columns (ignored by the dashboard, kept for side-by-side audit)
     "base_score", "conf_mult", "score_v1", "eff_breadth",
+    "opt_bias", "new_count", "kicker",
 ]
-INT_FIELDS = {"rank", "breadth", "volume", "market_cap"}
+INT_FIELDS = {"rank", "breadth", "volume", "market_cap", "new_count"}
 FLOAT_FIELDS = {
     "last_price", "percent_change", "high_52w", "pct_change_1m", "weighted_alpha",
     "score", "s_breakout", "s_momentum", "s_trend", "s_participation", "s_options",
-    "base_score", "conf_mult", "score_v1", "eff_breadth",
+    "base_score", "conf_mult", "score_v1", "eff_breadth", "opt_bias", "kicker",
 }
 
 
@@ -284,14 +303,27 @@ def signal_participation(latest: dict) -> dict:
     return out
 
 
+def options_bias(row) -> float:
+    """Bullish/bearish read of an options-list row in [0,1] (1 = very call-heavy
+    = bullish, 0.5 = neutral, 0 = very put-heavy = bearish), blending the day's
+    put/call VOLUME flow with the standing put/call OPEN-INTEREST positioning.
+    Webull's *_pc_ratio fields are puts ÷ calls, so a ratio < 1 is call-heavy."""
+    pcv = to_float(row.get("vol_pc_ratio"))   # P/C Vol  (today's flow, reactive)
+    pco = to_float(row.get("oi_pc_ratio"))    # P/C OI   (standing positioning)
+    bias_vol = clamp(1 - pcv / 2) if pcv is not None else 0.5
+    bias_oi = clamp(1 - pco / 2) if pco is not None else 0.5
+    return 0.6 * bias_vol + 0.4 * bias_oi     # weight live flow a touch heavier
+
+
 def signal_options(latest: dict) -> dict:
     ovol = percentiles({s: to_float(r.get("option_volume")) for s, r in latest.items()})
     chg = percentiles({s: to_float(r.get("percent_change")) for s, r in latest.items()})
     out = {}
     for s, r in latest.items():
-        pcr = to_float(r.get("vol_pc_ratio"))
-        call_bias = clamp(1 - pcr / 2) if pcr is not None else 0.5  # <1 put/call ⇒ call-heavy
-        out[s] = clamp(0.40 * ovol[s] + 0.35 * call_bias + 0.25 * chg[s])
+        # Directionality (P/C Vol + P/C OI) now carries the most weight in the
+        # options signal — a call-heavy name on the options-volume list is the
+        # bullish setup we care about; a put-heavy one is discounted.
+        out[s] = clamp(0.30 * ovol[s] + 0.45 * options_bias(r) + 0.25 * chg[s])
     return out
 
 
@@ -328,6 +360,7 @@ def pick_name(symbol, feed_data, order):
 def build_picks(top_n: int = 100, as_of: str | None = None):
     feed_data = {}        # feed_id -> {symbol: row}   (today's snapshot, for display)
     feed_member = {}      # feed_id -> {symbol: (age, signal[0,1], presence_weight)}
+    feed_new = {}         # feed_id -> set of symbols NEW on the list today
     feed_date = {}
     present_feeds = []
     for feed_id, code, weight, comp in FEEDS:
@@ -335,6 +368,7 @@ def build_picks(top_n: int = 100, as_of: str | None = None):
         if not snaps:
             feed_data[feed_id] = {}
             feed_member[feed_id] = {}
+            feed_new[feed_id] = set()
             feed_date[feed_id] = None
             print(f"  [warn] {feed_id}: no data found", file=sys.stderr)
             continue
@@ -351,6 +385,9 @@ def build_picks(top_n: int = 100, as_of: str | None = None):
                 if sym not in member:            # first sighting walking back = most recent
                     member[sym] = (age, sigmaps[age].get(sym, 0.0), pw)
         feed_member[feed_id] = member
+        # New today = on the list today but not in the immediately prior snapshot.
+        prev_syms = set(snaps[1][1].keys()) if len(snaps) > 1 else set()
+        feed_new[feed_id] = set(snaps[0][1].keys()) - prev_syms
 
     if not present_feeds:
         raise SystemExit("[overallpicks] No source data found in any sibling feed. Run the 5 scrapers first.")
@@ -400,11 +437,24 @@ def build_picks(top_n: int = 100, as_of: str | None = None):
         # Confluence multiplier uses the decayed "soft" breadth so a one-day list
         # drop doesn't yank the multiplier down with it.
         conf_mult = 1.0 + CONFLUENCE_BONUS * (eff_breadth - 1) if eff_breadth else 0.0
-        score = clamp(base_score * conf_mult, 0.0, SCORE_CAP)
-        # Scale the per-component bars by the same multiplier so the hover
-        # breakdown still sums (pre-cap) to the displayed conviction score.
+
+        # ---- v3 options-led kickers ----
+        # Bullish/bearish options read (only meaningful when on the options list today).
+        on_opt = sym in feed_data["topoptions"]
+        on_act = sym in feed_data["mostactive"]
+        opt_bias = options_bias(feed_data["topoptions"][sym]) if on_opt else None
+        # Flow: options-volume list + most-active list + bullish positioning.
+        flow_mult = 1.0 + FLOW_BONUS if (on_opt and on_act and (opt_bias or 0) >= FLOW_BULLISH_MIN) else 1.0
+        # Fresh breakout: appearing for the first time today on 3+ lists at once.
+        new_count = sum(1 for fid in present_feeds if sym in feed_new[fid])
+        fresh_mult = 1.0 + FRESH_BONUS if new_count >= FRESH_MIN_LISTS else 1.0
+        kicker = flow_mult * fresh_mult
+
+        score = clamp(base_score * conf_mult * kicker, 0.0, SCORE_CAP)
+        # Scale the per-component bars by every multiplier so the hover breakdown
+        # still sums (pre-cap) to the displayed conviction score.
         for k in comps:
-            comps[k] *= conf_mult
+            comps[k] *= conf_mult * kicker
 
         picks.append({
             "symbol": sym,
@@ -430,6 +480,9 @@ def build_picks(top_n: int = 100, as_of: str | None = None):
             "conf_mult": round(conf_mult, 3),
             "score_v1": round(score_v1, 1),
             "eff_breadth": round(eff_breadth, 2),
+            "opt_bias": round(opt_bias, 2) if opt_bias is not None else None,
+            "new_count": new_count,
+            "kicker": round(kicker, 3),
         })
 
     # Sort by score desc, then effective breadth desc, then symbol for stability.
