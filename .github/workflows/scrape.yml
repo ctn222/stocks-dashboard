@@ -8,10 +8,23 @@ name: Daily scrape
 
 on:
   schedule:
-    # 21:10 UTC, Mon–Fri = after the 4:00 PM ET market close year-round
-    # (5:10 PM during EDT / summer, 4:10 PM during EST / winter).
-    # GitHub cron is always UTC and does NOT follow daylight saving.
+    # GitHub cron is always UTC and does NOT follow daylight saving, so the
+    # ET times below shift by an hour between EDT (summer) and EST (winter).
     # GitHub may also delay scheduled runs by 5–30 min under load.
+    #
+    # ── Mid-morning pull, ~15 min after the 9:30 AM ET open ──────────────
+    # Both offsets are listed so a 9:45 AM ET pull happens year-round:
+    #   13:45 UTC =  9:45 AM EDT (summer) |  8:45 AM EST (winter, pre-open)
+    #   14:45 UTC = 10:45 AM EDT (summer) |  9:45 AM EST (winter)
+    # Both fire every weekday; each scraper keeps ONE row per date, so the
+    # later run simply refreshes that day's row — the stored morning snapshot
+    # is always the most recent post-open pull.
+    - cron: "45 13 * * 1-5"
+    - cron: "45 14 * * 1-5"
+    #
+    # ── Post-close pull (this one becomes the day's final record) ────────
+    # 21:10 UTC = 5:10 PM EDT (summer) | 4:10 PM EST (winter) — after the
+    # 4:00 PM ET close year-round.
     - cron: "10 21 * * 1-5"
   workflow_dispatch: {}        # adds a manual "Run workflow" button
 
