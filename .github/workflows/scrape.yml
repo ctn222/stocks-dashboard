@@ -8,24 +8,34 @@ name: Daily scrape
 
 on:
   schedule:
-    # GitHub cron is always UTC and does NOT follow daylight saving, so the
-    # ET times below shift by an hour between EDT (summer) and EST (winter).
-    # GitHub may also delay scheduled runs by 5–30 min under load.
+    # TARGET TIMES: 9:45 AM ET and 4:15 PM ET, every weekday.
     #
-    # ── Mid-morning pull, ~15 min after the 9:30 AM ET open ──────────────
-    # Both offsets are listed so a 9:45 AM ET pull happens year-round:
-    #   13:45 UTC =  9:45 AM EDT (summer) |  8:45 AM EST (winter, pre-open)
-    #   14:45 UTC = 10:45 AM EDT (summer) |  9:45 AM EST (winter)
-    # Both fire every weekday; each scraper keeps ONE row per date, so the
-    # later run simply refreshes that day's row — the stored morning snapshot
-    # is always the most recent post-open pull.
+    # Two caveats that make the cron lines look odd:
+    #  1. GitHub cron is always UTC and does NOT follow daylight saving, so each
+    #     target needs BOTH offsets listed to hit the same ET clock time all
+    #     year (EDT = UTC-4 in summer, EST = UTC-5 in winter).
+    #  2. GitHub's scheduler is best-effort. Measured on this repo, runs start
+    #     43–70 min LATER than the cron time, so treat these as "no earlier
+    #     than" rather than exact. Because of that, the DST twin listed second
+    #     in each pair is also the safety net if the first is badly delayed.
+    #
+    # Each scraper keeps ONE row per date — a same-date re-run REPLACES that
+    # date's rows — so the extra twin never duplicates history; it just
+    # refreshes the day's snapshot, and the last run of the day wins.
+    #
+    # ── Mid-morning pull (target 9:45 AM ET, ~15 min after the 9:30 open) ─
+    #   13:45 UTC =  9:45 AM EDT |  8:45 AM EST (pre-open; replaced by next)
+    #   14:45 UTC = 10:45 AM EDT |  9:45 AM EST
     - cron: "45 13 * * 1-5"
     - cron: "45 14 * * 1-5"
     #
-    # ── Post-close pull (this one becomes the day's final record) ────────
-    # 21:10 UTC = 5:10 PM EDT (summer) | 4:10 PM EST (winter) — after the
-    # 4:00 PM ET close year-round.
-    - cron: "10 21 * * 1-5"
+    # ── Post-close pull (target 4:15 PM ET; last run = the day's record) ──
+    #   20:15 UTC =  4:15 PM EDT |  3:15 PM EST (mid-session; replaced below)
+    #   21:15 UTC =  5:15 PM EDT |  4:15 PM EST
+    # Both land after the 4:00 PM close in EDT; in EST the 21:15 twin is the
+    # post-close one, so the final stored row is always post-close either way.
+    - cron: "15 20 * * 1-5"
+    - cron: "15 21 * * 1-5"
   workflow_dispatch: {}        # adds a manual "Run workflow" button
 
 permissions:
