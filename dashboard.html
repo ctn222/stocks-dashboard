@@ -551,35 +551,33 @@
 <div class="tooltip" id="tooltip"></div>
 
 <!-- SCAFFOLD: DATA SCRIPTS START -->
-<script src="overallpicks/data.js"></script>
 <script>
-  window.DATA_OVERALLPICKS = window.WEBULL_DATA || [];
-  window.GEN_OVERALLPICKS = window.WEBULL_GENERATED_AT || "";
-</script>
-<script src="barchart100/data.js"></script>
-<script>
-  window.DATA_BARCHART = window.BARCHART_DATA || [];
-  window.GEN_BARCHART = window.BARCHART_GENERATED_AT || "";
-</script>
-<script src="topoptions/data.js"></script>
-<script>
-  window.DATA_TOPOPTIONS = window.WEBULL_DATA || [];
-  window.GEN_TOPOPTIONS = window.WEBULL_GENERATED_AT || "";
-</script>
-<script src="mostactive/data.js"></script>
-<script>
-  window.DATA_MOSTACTIVE = window.WEBULL_DATA || [];
-  window.GEN_MOSTACTIVE = window.WEBULL_GENERATED_AT || "";
-</script>
-<script src="topgainers1m/data.js"></script>
-<script>
-  window.DATA_TOPGAINERS1M = window.WEBULL_DATA || [];
-  window.GEN_TOPGAINERS1M = window.WEBULL_GENERATED_AT || "";
-</script>
-<script src="52weeknewhigh/data.js"></script>
-<script>
-  window.DATA_52WEEKNEWHIGH = window.WEBULL_DATA || [];
-  window.GEN_52WEEKNEWHIGH = window.WEBULL_GENERATED_AT || "";
+  /* Load each feed's data.js with a cache-busting version token so a reload —
+     especially the auto-reload right after "Update data", which fires within
+     GitHub Pages' 10-min cache window — always gets the freshly published file
+     instead of the browser's cached copy. Default token = today's date (repeat
+     same-day visits still hit cache); after an update the page reloads with
+     ?fresh=<ts>, which forces a fresh fetch. document.write keeps the strict
+     load order (each data.js overwrites window.WEBULL_DATA, so its globals are
+     captured immediately after it loads). */
+  (function () {
+    var V = new URLSearchParams(location.search).get("fresh")
+            || new Date().toISOString().slice(0, 10);
+    var feeds = [
+      ["overallpicks",  "DATA_OVERALLPICKS",  "WEBULL_DATA",   "GEN_OVERALLPICKS",  "WEBULL_GENERATED_AT"],
+      ["barchart100",   "DATA_BARCHART",      "BARCHART_DATA", "GEN_BARCHART",      "BARCHART_GENERATED_AT"],
+      ["topoptions",    "DATA_TOPOPTIONS",    "WEBULL_DATA",   "GEN_TOPOPTIONS",    "WEBULL_GENERATED_AT"],
+      ["mostactive",    "DATA_MOSTACTIVE",    "WEBULL_DATA",   "GEN_MOSTACTIVE",    "WEBULL_GENERATED_AT"],
+      ["topgainers1m",  "DATA_TOPGAINERS1M",  "WEBULL_DATA",   "GEN_TOPGAINERS1M",  "WEBULL_GENERATED_AT"],
+      ["52weeknewhigh", "DATA_52WEEKNEWHIGH", "WEBULL_DATA",   "GEN_52WEEKNEWHIGH", "WEBULL_GENERATED_AT"]
+    ];
+    var v = encodeURIComponent(V);
+    feeds.forEach(function (f) {
+      document.write('<script src="' + f[0] + '/data.js?v=' + v + '"><\/script>');
+      document.write('<script>window.' + f[1] + '=window.' + f[2] + '||[];'
+                   + 'window.' + f[3] + '=window.' + f[4] + '||"";<\/script>');
+    });
+  })();
 </script>
 <!-- SCAFFOLD: DATA SCRIPTS END -->
 <script>
@@ -1827,7 +1825,7 @@ setActiveProject("overallpicks");
         stop();
         icon.textContent = "✓"; label.textContent = "Updated";
         setStatus("New data is live — reloading…", "ok");
-        setTimeout(() => location.reload(), 800);
+        setTimeout(() => location.replace(location.pathname + "?fresh=" + Date.now()), 800);
         return;
       }
     }
@@ -1849,7 +1847,7 @@ setActiveProject("overallpicks");
   }
 
   btn.addEventListener("click", () => {
-    if (btn.dataset.mode === "reload") { location.reload(); return; }
+    if (btn.dataset.mode === "reload") { location.replace(location.pathname + "?fresh=" + Date.now()); return; }
     if (polling) return;
     startUpdate();
   });
