@@ -358,36 +358,82 @@ def pick_name(symbol, feed_data, order):
 
 
 def build_picks(top_n: int = 100, as_of: str | None = None):
-    feed_data = {}        # feed_id -> {symbol: row}   (today's snapshot, for display)
+    # ---- pass 1: read snapshots and build a SHARED date axis --------------
+    # Age must be measured on a calendar shared by all feeds, not on each
+    # feed's own list of snapshots. Otherwise a feed that stops updating keeps
+    # its newest (stale) snapshot at index 0 and is credited as if it were
+    # current, forever — which is exactly what happened when Barchart broke on
+    # 2026-08-28 and kept scoring for days afterwards.
+    raw = {}
+    all_dates = set()
+    for feed_id, code, weight, comp in FEEDS:
+        snaps = read_recent(feed_id, MEMBERSHIP_WINDOW + 1, as_of=as_of)   # newest first
+        raw[feed_id] = snaps
+        all_dates.update(d for d, _ in snaps)
+
+    if not all_dates:
+        raise SystemExit("[overallpicks] No source data found in any sibling feed. Run the 5 scrapers first.")
+
+    # axis[0] = most recent day ANY feed produced data. A feed's age is its
+    # distance on this axis, so missed days age it out naturally. Weekends and
+    # holidays don't count, because no feed has data on them.
+    axis = sorted(all_dates, reverse=True)
+    age_of_date = {d: i for i, d in enumerate(axis)}
+    current_date = axis[0]
+
+    feed_data = {}        # feed_id -> {symbol: row}   CURRENT snapshot only
     feed_member = {}      # feed_id -> {symbol: (age, signal[0,1], presence_weight)}
     feed_new = {}         # feed_id -> set of symbols NEW on the list today
     feed_date = {}
+    feed_age = {}
     present_feeds = []
     for feed_id, code, weight, comp in FEEDS:
-        snaps = read_recent(feed_id, MEMBERSHIP_WINDOW + 1, as_of=as_of)   # newest first; [0] = "today"
+        snaps = raw[feed_id]
+        feed_data[feed_id] = {}
+        feed_member[feed_id] = {}
+        feed_new[feed_id] = set()
+        feed_date[feed_id] = None
+        feed_age[feed_id] = None
         if not snaps:
-            feed_data[feed_id] = {}
-            feed_member[feed_id] = {}
-            feed_new[feed_id] = set()
-            feed_date[feed_id] = None
             print(f"  [warn] {feed_id}: no data found", file=sys.stderr)
             continue
-        feed_date[feed_id] = snaps[0][0]
-        feed_data[feed_id] = snaps[0][1]
+
+        latest_date = snaps[0][0]
+        age = age_of_date[latest_date]
+        feed_date[feed_id] = latest_date
+        feed_age[feed_id] = age
+
+        if age > MEMBERSHIP_WINDOW:
+            # Too stale to contribute anything — treat the feed as absent.
+            print(f"  [warn] {feed_id}: latest snapshot {latest_date} is {age} days "
+                  f"behind {current_date}; excluded", file=sys.stderr)
+            continue
+
         present_feeds.append(feed_id)
+        if age > 0:
+            print(f"  [warn] {feed_id}: stale — latest {latest_date} is {age} day(s) "
+                  f"behind {current_date}; credit decayed to "
+                  f"{MEMBERSHIP_DECAY ** age:.2f}", file=sys.stderr)
+
+        # Only a feed with CURRENT data counts as "on the list today" — this
+        # drives the universe, display fields and the flow kicker.
+        if age == 0:
+            feed_data[feed_id] = snaps[0][1]
+            prev_syms = set(snaps[1][1].keys()) if len(snaps) > 1 else set()
+            feed_new[feed_id] = set(snaps[0][1].keys()) - prev_syms
+
         # Signal map for each snapshot (percentiles are within that day's list).
         sigmaps = [SIGNAL_FN[comp](rows) for _, rows in snaps]
-        # Most-recent presence per symbol → decayed credit (age 0 = on the list today).
         member = {}
-        for age, (_, rows) in enumerate(snaps):
-            pw = MEMBERSHIP_DECAY ** age
+        for i, (d, rows) in enumerate(snaps):
+            a = age_of_date[d]
+            if a > MEMBERSHIP_WINDOW:
+                continue
+            pw = MEMBERSHIP_DECAY ** a
             for sym in rows:
                 if sym not in member:            # first sighting walking back = most recent
-                    member[sym] = (age, sigmaps[age].get(sym, 0.0), pw)
+                    member[sym] = (a, sigmaps[i].get(sym, 0.0), pw)
         feed_member[feed_id] = member
-        # New today = on the list today but not in the immediately prior snapshot.
-        prev_syms = set(snaps[1][1].keys()) if len(snaps) > 1 else set()
-        feed_new[feed_id] = set(snaps[0][1].keys()) - prev_syms
 
     if not present_feeds:
         raise SystemExit("[overallpicks] No source data found in any sibling feed. Run the 5 scrapers first.")
