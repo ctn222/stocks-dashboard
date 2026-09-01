@@ -91,11 +91,52 @@ jobs:
             git push
           fi
 
-      - name: Report scraper failures
-        if: steps.scrape.outputs.failed != ''
+      # Only fail the run — and therefore only send a notification email — for
+      # UNEXPECTED breakage. A source listed in TOLERATED is known to be broken
+      # upstream; the other feeds still commit fine, so failing every run for it
+      # just trains you to ignore the alerts. Status is always written to the
+      # run summary, so a tolerated failure is still visible in the Actions UI.
+      #
+      # Remove a feed from TOLERATED as soon as it is fixed, so a future
+      # regression starts alerting again.
+      - name: Report scraper status
+        if: always() && steps.scrape.outcome != 'skipped'
+        env:
+          FAILED: ${{ steps.scrape.outputs.failed }}
+          TOLERATED: "barchart100"   # blocked upstream since 2026-08-28 (no XSRF cookie)
         run: |
-          echo "::error::Some scrapers failed:${{ steps.scrape.outputs.failed }}"
-          echo "Good data from the others was still committed."
-          echo "If a financial site is blocking GitHub's IP, that scraper"
-          echo "may need to stay on the Mac (hybrid mode) — see DEPLOY.md."
-          exit 1
+          set -u
+          unexpected=""
+          for f in $FAILED; do
+            is_tolerated=0
+            for t in $TOLERATED; do
+              if [ "$f" = "$t" ]; then
+                is_tolerated=1
+              fi
+            done
+            if [ "$is_tolerated" -eq 0 ]; then
+              unexpected="$unexpected $f"
+            fi
+          done
+
+          {
+            echo "### Daily scrape"
+            if [ -z "$FAILED" ]; then
+              echo "All feeds refreshed successfully."
+            else
+              echo "Failed feeds:\`$FAILED\`"
+              [ -n "$unexpected" ] && echo "Unexpected:\`$unexpected\`" \
+                                  || echo "All failures are known/tolerated (\`$TOLERATED\`)."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ -n "$unexpected" ]; then
+            echo "::error::Unexpected scraper failure:$unexpected"
+            echo "Good data from the other feeds was still committed."
+            exit 1
+          fi
+
+          if [ -n "$FAILED" ]; then
+            echo "::warning::Known-degraded feed(s) failed:$FAILED (tolerated, run not failed)"
+          fi
+          echo "No unexpected failures."
